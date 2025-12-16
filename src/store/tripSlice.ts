@@ -6,6 +6,12 @@ export interface Trip {
     distance: number; // in km
     duration: number; // in seconds
     coordinates: { latitude: number; longitude: number }[];
+    avgSpeed?: number; // km/h
+    maxSpeed?: number; // km/h
+    calories?: number;
+    startTime?: string;
+    endTime?: string;
+    userId?: string; // for cloud sync
 }
 
 interface TripState {
@@ -26,12 +32,17 @@ const tripSlice = createSlice({
     reducers: {
         startTrip: (state) => {
             state.isTracking = true;
+            const now = new Date().toISOString();
             state.currentTrip = {
                 id: Date.now().toString(),
-                date: new Date().toISOString(),
+                date: now,
                 distance: 0,
                 duration: 0,
                 coordinates: [],
+                startTime: now,
+                avgSpeed: 0,
+                maxSpeed: 0,
+                calories: 0,
             };
         },
         updateTrip: (state, action: PayloadAction<{ location: { latitude: number; longitude: number }; distanceDelta: number }>) => {

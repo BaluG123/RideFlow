@@ -5,8 +5,10 @@ export const colors = {
     text: '#064E3B', // Emerald 900
     white: '#FFFFFF',
     gray: '#6B7280',
+    lightGray: '#E5E7EB',
     error: '#EF4444',
     success: '#10B981',
+    warning: '#F59E0B',
     darkOverlay: 'rgba(0,0,0,0.5)',
     card: '#FFFFFF',
     border: '#D1FAE5',

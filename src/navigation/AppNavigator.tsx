@@ -7,8 +7,10 @@ import TrackerScreen from '../screens/TrackerScreen';
 import SplashScreen from '../screens/SplashScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import TripDetailScreen from '../screens/TripDetailScreen';
+import AnalyticsScreen from '../screens/AnalyticsScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import { colors } from '../theme/colors';
-import { Bike, Map, User } from 'lucide-react-native';
+import { Bike, Map, User, BarChart3, Settings } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 
 const Tab = createBottomTabNavigator();
@@ -66,13 +68,25 @@ const TabNavigator = () => {
                 }}
             />
             <Tab.Screen
-                name="Profile"
-                component={ProfileScreen}
+                name="Analytics"
+                component={AnalyticsScreen}
                 options={{
-                    title: 'My Profile',
+                    title: 'Analytics',
                     tabBarIcon: ({ color, focused }) => (
                         <View style={[styles.iconContainer, focused && styles.activeIcon]}>
-                            <User color={focused ? colors.white : color} size={24} />
+                            <BarChart3 color={focused ? colors.white : color} size={24} />
+                        </View>
+                    ),
+                }}
+            />
+            <Tab.Screen
+                name="Settings"
+                component={SettingsScreen}
+                options={{
+                    title: 'Settings',
+                    tabBarIcon: ({ color, focused }) => (
+                        <View style={[styles.iconContainer, focused && styles.activeIcon]}>
+                            <Settings color={focused ? colors.white : color} size={24} />
                         </View>
                     ),
                 }}

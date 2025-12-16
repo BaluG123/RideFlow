@@ -9,17 +9,26 @@ import Geolocation from 'react-native-geolocation-service';
 import { Play, Square } from 'lucide-react-native';
 import { LEAFLET_HTML } from '../components/LeafletMapHtml';
 import { saveTrip } from '../services/database';
+import { AnalyticsService } from '../services/analytics';
 
 const TrackerScreen = () => {
     const dispatch = useDispatch();
-    const { isTracking, currentTrip } = useSelector((state: RootState) => state.trips);
+    const { isTracking, currentTrip, trips } = useSelector((state: RootState) => state.trips);
     const [permissionGranted, setPermissionGranted] = useState(false);
     const [currentPosition, setCurrentPosition] = useState<{ latitude: number; longitude: number } | null>(null);
+    const [todayDistance, setTodayDistance] = useState(0);
+    const [currentSpeed, setCurrentSpeed] = useState(0);
     const webViewRef = useRef<WebView>(null);
 
     useEffect(() => {
         requestPermission();
     }, []);
+
+    useEffect(() => {
+        // Calculate today's distance whenever trips change
+        const today = AnalyticsService.getTodayDistance(trips);
+        setTodayDistance(today);
+    }, [trips]);
 
     const requestPermission = async () => {
         if (Platform.OS === 'ios') {
@@ -37,13 +46,17 @@ const TrackerScreen = () => {
         if (isTracking && permissionGranted) {
             const watchId = Geolocation.watchPosition(
                 (position) => {
-                    const { latitude, longitude } = position.coords;
+                    const { latitude, longitude, speed } = position.coords;
                     const newLoc = { latitude, longitude };
 
                     let dist = 0;
                     if (currentPosition) {
                         dist = getDistanceFromLatLonInKm(currentPosition.latitude, currentPosition.longitude, latitude, longitude);
                     }
+
+                    // Update current speed (convert m/s to km/h)
+                    const speedKmh = speed ? Math.max(0, speed * 3.6) : 0;
+                    setCurrentSpeed(speedKmh);
 
                     setCurrentPosition(newLoc);
                     dispatch(updateTrip({ location: newLoc, distanceDelta: dist }));
@@ -87,11 +100,22 @@ const TrackerScreen = () => {
     const handleToggleTracking = async () => {
         if (isTracking) {
             if (currentTrip) {
+                // Calculate additional trip data
+                const enhancedTrip = {
+                    ...currentTrip,
+                    endTime: new Date().toISOString(),
+                    avgSpeed: AnalyticsService.calculateAvgSpeed(currentTrip.distance, currentTrip.duration),
+                    calories: AnalyticsService.calculateCalories(currentTrip.distance, currentTrip.duration),
+                };
+
                 // Save to database before stopping
                 try {
-                    await saveTrip(currentTrip);
+                    await saveTrip(enhancedTrip);
                     dispatch(stopTrip());
-                    Alert.alert('Trip Saved!', 'Your trip has been saved successfully!');
+                    Alert.alert(
+                        'Trip Completed! 🎉', 
+                        `Distance: ${enhancedTrip.distance.toFixed(2)} km\nCalories: ${enhancedTrip.calories} cal`
+                    );
                 } catch (error) {
                     Alert.alert('Error', 'Failed to save trip. Please try again.');
                     console.error('Error saving trip:', error);
@@ -140,10 +164,28 @@ const TrackerScreen = () => {
 
             <View style={styles.overlay}>
                 <View style={styles.statsContainer}>
-                    <Text style={styles.statsLabel}>Distance</Text>
-                    <Text style={styles.statsValue}>
-                        {currentTrip ? currentTrip.distance.toFixed(2) : '0.00'} km
-                    </Text>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statsLabel}>Current Trip</Text>
+                        <Text style={styles.statsValue}>
+                            {currentTrip ? currentTrip.distance.toFixed(2) : '0.00'} km
+                        </Text>
+                    </View>
+                    
+                    <View style={styles.statItem}>
+                        <Text style={styles.statsLabel}>Today's Total</Text>
+                        <Text style={styles.statsValue}>
+                            {(todayDistance + (currentTrip?.distance || 0)).toFixed(2)} km
+                        </Text>
+                    </View>
+
+                    {isTracking && (
+                        <View style={styles.statItem}>
+                            <Text style={styles.statsLabel}>Speed</Text>
+                            <Text style={styles.statsValue}>
+                                {currentSpeed.toFixed(1)} km/h
+                            </Text>
+                        </View>
+                    )}
                 </View>
 
                 <TouchableOpacity
@@ -170,7 +212,8 @@ const styles = StyleSheet.create({
     overlay: {
         position: 'absolute',
         bottom: 40,
-        width: '90%',
+        left: '5%',
+        right: '5%',
         backgroundColor: colors.white,
         padding: 20,
         borderRadius: 20,
@@ -178,12 +221,15 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 5 },
         shadowOpacity: 0.3,
         elevation: 5,
-        alignItems: 'center',
-        flexDirection: 'row',
-        justifyContent: 'space-between',
     },
     statsContainer: {
-        alignItems: 'flex-start',
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        marginBottom: 20,
+    },
+    statItem: {
+        alignItems: 'center',
+        flex: 1,
     },
     statsLabel: {
         color: colors.gray,
@@ -191,8 +237,9 @@ const styles = StyleSheet.create({
     },
     statsValue: {
         color: colors.text,
-        fontSize: 32,
+        fontSize: 20,
         fontWeight: 'bold',
+        marginTop: 4,
     },
     button: {
         paddingVertical: 15,
@@ -202,6 +249,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 10,
+        alignSelf: 'center',
     },
     startButton: {
         backgroundColor: colors.primary,

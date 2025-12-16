@@ -22,7 +22,7 @@ export const initDatabase = () => {
 };
 
 // Save a trip to the database
-export const saveTrip = async (trip: Trip): Promise<void> => {
+export const saveTrip = async (trip: Trip, syncToCloud: boolean = true): Promise<void> => {
     try {
         const coordinatesJson = JSON.stringify(trip.coordinates);
         db.execute(
@@ -30,7 +30,18 @@ export const saveTrip = async (trip: Trip): Promise<void> => {
              VALUES (?, ?, ?, ?, ?)`,
             [trip.id, trip.date, trip.distance, trip.duration, coordinatesJson]
         );
-        console.log('Trip saved:', trip.id);
+        console.log('Trip saved locally:', trip.id);
+
+        // Sync to cloud if enabled
+        if (syncToCloud) {
+            try {
+                const { FirebaseService } = await import('./firebase');
+                await FirebaseService.syncTripToCloud(trip);
+            } catch (cloudError) {
+                console.log('Cloud sync failed, but local save succeeded:', cloudError);
+                // Don't throw - local save is more important
+            }
+        }
     } catch (error) {
         console.error('Error saving trip:', error);
         throw error;
