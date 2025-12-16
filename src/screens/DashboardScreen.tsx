@@ -18,6 +18,8 @@ const DashboardScreen = ({ navigation }: any) => {
         const loadData = async () => {
             initDatabase();
             const savedTrips = await loadTrips();
+            
+            // Scheduler disabled for now
             dispatch(loadTripsFromDB(savedTrips));
         };
         loadData();

@@ -110,8 +110,14 @@ const TrackerScreen = () => {
 
                 // Save to database before stopping
                 try {
-                    await saveTrip(enhancedTrip);
+                    await saveTrip(enhancedTrip, false); // Disable cloud sync for now
                     dispatch(stopTrip());
+                    
+                    // Show achievement notifications
+                    const newTotalDistance = todayDistance + enhancedTrip.distance;
+                    
+                    // Achievement check disabled for now
+                    
                     Alert.alert(
                         'Trip Completed! 🎉', 
                         `Distance: ${enhancedTrip.distance.toFixed(2)} km\nCalories: ${enhancedTrip.calories} cal`

@@ -12,7 +12,20 @@
           "package_name": "com.cycletracker"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "206602606190-0nr4nv1cbeqvc4sj7bhai1cr6ebj7oc6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.cycletracker",
+            "certificate_hash": "fca9f92d8b20c410601068c1f4d3703862bbbaaa"
+          }
+        },
+        {
+          "client_id": "206602606190-gbt0v1c0gp0qhjeivus1r99f13k2cdjt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAw2wmmah-UQqCcJgPZ4zb0gix6EyNpszo"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "206602606190-gbt0v1c0gp0qhjeivus1r99f13k2cdjt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

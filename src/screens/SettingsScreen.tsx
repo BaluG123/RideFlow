@@ -7,47 +7,47 @@ import {
     Alert,
     Switch,
     ScrollView,
+    Image,
 } from 'react-native';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { colors } from '../theme/colors';
-import { Cloud, CloudOff, Download, Upload, User, Settings as SettingsIcon } from 'lucide-react-native';
+import { Cloud, CloudOff, Download, Upload, User, Settings as SettingsIcon, Bell, BellOff, Clock } from 'lucide-react-native';
 
 const SettingsScreen = () => {
     const { trips } = useSelector((state: RootState) => state.trips);
     const [isSignedIn, setIsSignedIn] = useState(false);
+    const [userProfile, setUserProfile] = useState<any>(null);
     const [cloudSyncEnabled, setCloudSyncEnabled] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
+    const [notificationSettings, setNotificationSettings] = useState({
+        dailyReminder: true,
+        goalAchievements: true,
+        weeklyReports: true,
+        streakReminders: true,
+        reminderTime: '18:00',
+    });
 
     useEffect(() => {
-        // Initialize Firebase auth state checking
+        // Initialize services
         initializeAuth();
+        initializeNotifications();
     }, []);
 
     const initializeAuth = async () => {
-        try {
-            const { FirebaseService } = await import('../services/firebase');
-            const unsubscribe = FirebaseService.onAuthStateChanged((user) => {
-                setIsSignedIn(!!user);
-            });
-            return unsubscribe;
-        } catch (error) {
-            console.log('Firebase not available:', error);
-        }
+        console.log('Auth initialization skipped');
     };
 
-    const handleSignIn = async () => {
-        try {
-            setIsLoading(true);
-            const { FirebaseService } = await import('../services/firebase');
-            await FirebaseService.signInAnonymously();
-            Alert.alert('Success', 'Signed in successfully! Your data will now sync to the cloud.');
-        } catch (error) {
-            Alert.alert('Error', 'Failed to sign in. Please try again.');
-            console.error('Sign in error:', error);
-        } finally {
-            setIsLoading(false);
-        }
+    const initializeNotifications = async () => {
+        console.log('Notifications disabled for now');
+    };
+
+    const handleGoogleSignIn = async () => {
+        Alert.alert('Coming Soon!', 'Google Sign-In will be available in a future update.');
+    };
+
+    const handleAnonymousSignIn = async () => {
+        Alert.alert('Coming Soon!', 'Cloud backup will be available in a future update.');
     };
 
     const handleSignOut = async () => {
@@ -144,6 +144,34 @@ const SettingsScreen = () => {
         );
     };
 
+    const updateNotificationSetting = async (key: string, value: boolean | string) => {
+        const newSettings = { ...notificationSettings, [key]: value };
+        setNotificationSettings(newSettings);
+        console.log('Notification setting updated:', key, value);
+    };
+
+    const showTimePickerAlert = () => {
+        Alert.prompt(
+            'Set Reminder Time',
+            'Enter time in HH:MM format (24-hour)',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Set',
+                    onPress: (time) => {
+                        if (time && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
+                            updateNotificationSetting('reminderTime', time);
+                        } else {
+                            Alert.alert('Invalid Time', 'Please enter time in HH:MM format (e.g., 18:00)');
+                        }
+                    },
+                },
+            ],
+            'plain-text',
+            notificationSettings.reminderTime
+        );
+    };
+
     const SettingItem = React.memo(({ 
         title, 
         subtitle, 
@@ -182,23 +210,67 @@ const SettingsScreen = () => {
 
     return (
         <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+            {/* User Profile Section */}
+            {isSignedIn && userProfile && (
+                <View style={styles.profileSection}>
+                    <View style={styles.profileCard}>
+                        {userProfile.photoURL ? (
+                            <Image source={{ uri: userProfile.photoURL }} style={styles.profileImage} />
+                        ) : (
+                            <View style={styles.profileImagePlaceholder}>
+                                <User size={40} color={colors.white} />
+                            </View>
+                        )}
+                        <View style={styles.profileInfo}>
+                            <Text style={styles.profileName}>
+                                {userProfile.displayName || 'Anonymous User'}
+                            </Text>
+                            <Text style={styles.profileEmail}>
+                                {userProfile.email || 'No email'}
+                            </Text>
+                            <Text style={styles.profileStatus}>
+                                ✅ Cloud sync enabled
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            )}
+
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Account & Sync</Text>
                 
-                <SettingItem
-                    key="auth-setting"
-                    title={isSignedIn ? 'Signed In' : 'Sign In'}
-                    subtitle={isSignedIn ? 'Cloud sync enabled' : 'Enable cloud backup'}
-                    icon={isSignedIn ? User : CloudOff}
-                    onPress={isSignedIn ? handleSignOut : handleSignIn}
-                    rightComponent={
-                        isSignedIn ? (
+                {!isSignedIn ? (
+                    <>
+                        <SettingItem
+                            key="google-signin"
+                            title="Sign in with Google"
+                            subtitle="Sync your rides across all devices"
+                            icon={User}
+                            onPress={handleGoogleSignIn}
+                        />
+                        
+                        <SettingItem
+                            key="anonymous-signin"
+                            title="Sign in Anonymously"
+                            subtitle="Basic cloud backup without account"
+                            icon={CloudOff}
+                            onPress={handleAnonymousSignIn}
+                        />
+                    </>
+                ) : (
+                    <SettingItem
+                        key="signout-setting"
+                        title="Sign Out"
+                        subtitle="Your local data will remain safe"
+                        icon={User}
+                        onPress={handleSignOut}
+                        rightComponent={
                             <TouchableOpacity onPress={handleSignOut}>
                                 <Text style={styles.signOutText}>Sign Out</Text>
                             </TouchableOpacity>
-                        ) : null
-                    }
-                />
+                        }
+                    />
+                )}
 
                 <SettingItem
                     key="sync-setting"
@@ -211,6 +283,63 @@ const SettingsScreen = () => {
                             value={cloudSyncEnabled && isSignedIn}
                             onValueChange={setCloudSyncEnabled}
                             disabled={!isSignedIn}
+                        />
+                    }
+                />
+            </View>
+
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Notifications</Text>
+                
+                <SettingItem
+                    key="daily-reminder"
+                    title="Daily Ride Reminder"
+                    subtitle={`Remind me at ${notificationSettings.reminderTime}`}
+                    icon={notificationSettings.dailyReminder ? Bell : BellOff}
+                    onPress={showTimePickerAlert}
+                    rightComponent={
+                        <Switch
+                            value={notificationSettings.dailyReminder}
+                            onValueChange={(value) => updateNotificationSetting('dailyReminder', value)}
+                        />
+                    }
+                />
+
+                <SettingItem
+                    key="goal-achievements"
+                    title="Goal Achievements"
+                    subtitle="Celebrate when you reach your goals"
+                    icon={notificationSettings.goalAchievements ? Bell : BellOff}
+                    rightComponent={
+                        <Switch
+                            value={notificationSettings.goalAchievements}
+                            onValueChange={(value) => updateNotificationSetting('goalAchievements', value)}
+                        />
+                    }
+                />
+
+                <SettingItem
+                    key="streak-reminders"
+                    title="Streak Reminders"
+                    subtitle="Stay motivated with streak notifications"
+                    icon={notificationSettings.streakReminders ? Bell : BellOff}
+                    rightComponent={
+                        <Switch
+                            value={notificationSettings.streakReminders}
+                            onValueChange={(value) => updateNotificationSetting('streakReminders', value)}
+                        />
+                    }
+                />
+
+                <SettingItem
+                    key="weekly-reports"
+                    title="Weekly Reports"
+                    subtitle="Get your weekly riding summary"
+                    icon={notificationSettings.weeklyReports ? Bell : BellOff}
+                    rightComponent={
+                        <Switch
+                            value={notificationSettings.weeklyReports}
+                            onValueChange={(value) => updateNotificationSetting('weeklyReports', value)}
                         />
                     }
                 />
@@ -260,6 +389,56 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: colors.background,
+    },
+    profileSection: {
+        margin: 16,
+        marginBottom: 0,
+    },
+    profileCard: {
+        backgroundColor: colors.white,
+        padding: 20,
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    profileImage: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        marginRight: 16,
+    },
+    profileImagePlaceholder: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: colors.primary,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 16,
+    },
+    profileInfo: {
+        flex: 1,
+    },
+    profileName: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: colors.text,
+        marginBottom: 4,
+    },
+    profileEmail: {
+        fontSize: 14,
+        color: colors.gray,
+        marginBottom: 4,
+    },
+    profileStatus: {
+        fontSize: 12,
+        color: colors.success,
+        fontWeight: '500',
     },
     section: {
         margin: 16,

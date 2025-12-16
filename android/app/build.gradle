@@ -1,7 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
-// apply plugin: "com.google.gms.google-services" // User Update: Uncomment this after adding google-services.json
+// apply plugin: "com.google.gms.google-services" // Disabled
 
 
 /**
@@ -118,4 +118,7 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // Google Sign-In - Disabled
+    // implementation 'com.google.android.gms:play-services-auth:20.7.0'
 }
