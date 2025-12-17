@@ -30,20 +30,21 @@ export const saveTrip = async (trip: Trip, syncToCloud: boolean = true): Promise
              VALUES (?, ?, ?, ?, ?)`,
             [trip.id, trip.date, trip.distance, trip.duration, coordinatesJson]
         );
-        console.log('Trip saved locally:', trip.id);
+        console.log('✅ Trip saved locally:', trip.id);
 
         // Sync to cloud if enabled
         if (syncToCloud) {
             try {
                 const { FirebaseService } = await import('./firebase');
                 await FirebaseService.syncTripToCloud(trip);
+                console.log('✅ Trip synced to cloud:', trip.id);
             } catch (cloudError) {
-                console.log('Cloud sync failed, but local save succeeded:', cloudError);
+                console.log('⚠️ Cloud sync failed, but local save succeeded:', cloudError);
                 // Don't throw - local save is more important
             }
         }
     } catch (error) {
-        console.error('Error saving trip:', error);
+        console.error('❌ Error saving trip:', error);
         throw error;
     }
 };

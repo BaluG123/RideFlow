@@ -12,7 +12,7 @@ import {
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { colors } from '../theme/colors';
-import { Cloud, CloudOff, Download, Upload, User, Settings as SettingsIcon, Bell, BellOff, Clock } from 'lucide-react-native';
+import { Cloud, CloudOff, Download, Upload, User, Bell, BellOff } from 'lucide-react-native';
 
 const SettingsScreen = () => {
     const { trips } = useSelector((state: RootState) => state.trips);
@@ -35,19 +35,84 @@ const SettingsScreen = () => {
     }, []);
 
     const initializeAuth = async () => {
-        console.log('Auth initialization skipped');
+        try {
+            const { FirebaseService } = await import('../services/firebase');
+            const unsubscribe = FirebaseService.onAuthStateChanged((user) => {
+                setIsSignedIn(!!user);
+                setUserProfile(user);
+                console.log('Auth state changed:', user ? 'Signed in' : 'Signed out');
+            });
+            return unsubscribe;
+        } catch (error) {
+            console.log('Firebase auth initialization failed:', error);
+        }
     };
 
     const initializeNotifications = async () => {
-        console.log('Notifications disabled for now');
+        try {
+            const { MessagingService } = await import('../services/messaging');
+            const enabled = await MessagingService.areNotificationsEnabled();
+            console.log('Notifications enabled:', enabled);
+            
+            if (enabled) {
+                // Subscribe to general topics
+                await MessagingService.subscribeToTopic('daily_reminders');
+                await MessagingService.subscribeToTopic('goal_achievements');
+            }
+        } catch (error) {
+            console.log('Notification initialization failed:', error);
+        }
     };
 
     const handleGoogleSignIn = async () => {
-        Alert.alert('Coming Soon!', 'Google Sign-In will be available in a future update.');
+        try {
+            setIsLoading(true);
+            const { FirebaseService } = await import('../services/firebase');
+            const user = await FirebaseService.signInWithGoogle();
+            
+            if (user) {
+                Alert.alert(
+                    'Welcome! 🎉', 
+                    `Hi ${user.displayName || 'there'}! Your rides will now sync across all your devices.`
+                );
+            }
+        } catch (error: any) {
+            console.error('Google Sign-In error:', error);
+            
+            if (error.code === 'auth/cancelled-popup-request' || 
+                error.code === 'auth/popup-closed-by-user' ||
+                error.message?.includes('cancelled')) {
+                // User cancelled, don't show error
+                return;
+            }
+            
+            Alert.alert(
+                'Sign In Failed', 
+                error.message || 'Please try again or check your internet connection.'
+            );
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleAnonymousSignIn = async () => {
-        Alert.alert('Coming Soon!', 'Cloud backup will be available in a future update.');
+        try {
+            setIsLoading(true);
+            const { FirebaseService } = await import('../services/firebase');
+            const user = await FirebaseService.signInAnonymously();
+            
+            if (user) {
+                Alert.alert('Success! 🎉', 'Signed in anonymously! Your data will now sync to the cloud.');
+            }
+        } catch (error: any) {
+            console.error('Anonymous sign-in error:', error);
+            Alert.alert(
+                'Sign In Failed', 
+                error.message || 'Please try again or check your internet connection.'
+            );
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleSignOut = async () => {
@@ -63,8 +128,11 @@ const SettingsScreen = () => {
                         try {
                             const { FirebaseService } = await import('../services/firebase');
                             await FirebaseService.signOut();
+                            setIsSignedIn(false);
+                            setUserProfile(null);
                             Alert.alert('Signed Out', 'You have been signed out successfully.');
-                        } catch (error) {
+                        } catch (error: any) {
+                            console.error('Sign out error:', error);
                             Alert.alert('Error', 'Failed to sign out.');
                         }
                     },
@@ -147,7 +215,35 @@ const SettingsScreen = () => {
     const updateNotificationSetting = async (key: string, value: boolean | string) => {
         const newSettings = { ...notificationSettings, [key]: value };
         setNotificationSettings(newSettings);
-        console.log('Notification setting updated:', key, value);
+        
+        try {
+            const { MessagingService } = await import('../services/messaging');
+            
+            // Subscribe/unsubscribe from topics based on settings
+            if (key === 'dailyReminder') {
+                if (value) {
+                    await MessagingService.subscribeToTopic('daily_reminders');
+                } else {
+                    await MessagingService.unsubscribeFromTopic('daily_reminders');
+                }
+            } else if (key === 'goalAchievements') {
+                if (value) {
+                    await MessagingService.subscribeToTopic('goal_achievements');
+                } else {
+                    await MessagingService.unsubscribeFromTopic('goal_achievements');
+                }
+            }
+            
+            // Save settings to Firebase if signed in
+            if (isSignedIn) {
+                const { FirebaseService } = await import('../services/firebase');
+                await FirebaseService.saveUserSettings({ notifications: newSettings });
+            }
+            
+            console.log('Notification setting updated:', key, value);
+        } catch (error) {
+            console.error('Error updating notification setting:', error);
+        }
     };
 
     const showTimePickerAlert = () => {
@@ -158,7 +254,7 @@ const SettingsScreen = () => {
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Set',
-                    onPress: (time) => {
+                    onPress: (time?: string) => {
                         if (time && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
                             updateNotificationSetting('reminderTime', time);
                         } else {
@@ -342,6 +438,25 @@ const SettingsScreen = () => {
                             onValueChange={(value) => updateNotificationSetting('weeklyReports', value)}
                         />
                     }
+                />
+
+                <SettingItem
+                    key="test-notification"
+                    title="Test Notification"
+                    subtitle="Send a test notification to verify setup"
+                    icon={Bell}
+                    onPress={async () => {
+                        try {
+                            const { MessagingService } = await import('../services/messaging');
+                            await MessagingService.sendLocalNotification(
+                                '🚴‍♂️ RideFlow Test',
+                                'Notifications are working perfectly! Ready to track your rides.',
+                                { type: 'test' }
+                            );
+                        } catch (error) {
+                            Alert.alert('Error', 'Failed to send test notification');
+                        }
+                    }}
                 />
             </View>
 

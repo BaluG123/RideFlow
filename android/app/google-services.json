@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "206602606190-0nr4nv1cbeqvc4sj7bhai1cr6ebj7oc6.apps.googleusercontent.com",
+          "client_id": "206602606190-8kvue6aa0ssrl276a2kgc347dirs8mh0.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.cycletracker",
-            "certificate_hash": "fca9f92d8b20c410601068c1f4d3703862bbbaaa"
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
           }
         },
         {
