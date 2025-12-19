@@ -3,6 +3,14 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
 
+// Load environment variables
+project.ext.envConfigFiles = [
+    debug: ".env",
+    release: ".env",
+]
+
+apply from: project(':react-native-config').projectDir.getPath() + "/dotenv.gradle"
+
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -86,6 +94,14 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        
+        // Add environment variables to BuildConfig
+        buildConfigField "String", "FIREBASE_WEB_CLIENT_ID", "\"${project.env.get("FIREBASE_WEB_CLIENT_ID")}\""
+        buildConfigField "String", "APP_NAME", "\"${project.env.get("APP_NAME")}\""
+        buildConfigField "String", "APP_VERSION", "\"${project.env.get("APP_VERSION")}\""
+        
+        // Add to resources for react-native-config
+        resValue "string", "build_config_package", "com.cycletracker"
     }
     signingConfigs {
         debug {

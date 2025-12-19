@@ -1,6 +1,7 @@
 import auth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import Config from 'react-native-config';
 import { Trip } from '../store/tripSlice';
 import { MessagingService } from './messaging';
 
@@ -9,14 +10,20 @@ let googleSignInConfigured = false;
 
 export const initializeGoogleSignIn = () => {
     try {
+        const webClientId = Config.FIREBASE_WEB_CLIENT_ID;
+        
+        if (!webClientId) {
+            throw new Error('FIREBASE_WEB_CLIENT_ID not found in environment variables');
+        }
+        
         GoogleSignin.configure({
-            webClientId: '206602606190-gbt0v1c0gp0qhjeivus1r99f13k2cdjt.apps.googleusercontent.com',
+            webClientId: webClientId,
         });
         googleSignInConfigured = true;
-        console.log('✅ Google Sign-In configured successfully');
+        if (__DEV__) console.log('✅ Google Sign-In configured successfully');
         return true;
     } catch (error) {
-        console.log('❌ Google Sign-In configuration failed:', error);
+        if (__DEV__) console.log('❌ Google Sign-In configuration failed:', error);
         return false;
     }
 };

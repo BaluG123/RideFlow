@@ -24,12 +24,19 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 var currentPath = null;
 var currentMarker = null;
+var isFirstUpdate = true;
+var followMode = true;
 
 // Custom icon for current position
 var bikeIcon = L.icon({
     iconUrl: 'https://cdn-icons-png.flaticon.com/512/3714/3714324.png',
     iconSize: [32, 32],
     iconAnchor: [16, 16],
+});
+
+// Disable map dragging to prevent user interaction
+map.on('dragstart', function() {
+    followMode = false;
 });
 
 function updateMap(data) {
@@ -57,7 +64,19 @@ function updateMap(data) {
                 currentMarker = L.marker(newLatLng, { icon: bikeIcon }).addTo(map);
             }
 
-            map.setView(newLatLng, 16); // Follow user
+            // Only center map on first update or if in follow mode
+            // Use panTo for smooth movement instead of setView
+            if (isFirstUpdate) {
+                map.setView(newLatLng, 16);
+                isFirstUpdate = false;
+            } else if (followMode) {
+                // Smooth pan to new location without zoom change
+                map.panTo(newLatLng, {
+                    animate: true,
+                    duration: 0.5,
+                    easeLinearity: 0.25
+                });
+            }
         }
     } catch (e) {
         // console.error(e);

@@ -49,6 +49,13 @@ const tripSlice = createSlice({
             if (state.isTracking && state.currentTrip) {
                 state.currentTrip.coordinates.push(action.payload.location);
                 state.currentTrip.distance += action.payload.distanceDelta;
+                
+                // Calculate duration in seconds
+                if (state.currentTrip.startTime) {
+                    const startTime = new Date(state.currentTrip.startTime).getTime();
+                    const currentTime = new Date().getTime();
+                    state.currentTrip.duration = Math.floor((currentTime - startTime) / 1000);
+                }
             }
         },
         stopTrip: (state) => {

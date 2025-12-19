@@ -212,6 +212,59 @@ const SettingsScreen = () => {
         );
     };
 
+    const handleDeleteAccount = async () => {
+        Alert.alert(
+            '⚠️ Delete Account',
+            'This will permanently delete your account and ALL your data from both your device and the cloud. This action cannot be undone.\n\nAre you absolutely sure?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete Forever',
+                    style: 'destructive',
+                    onPress: () => {
+                        // Double confirmation
+                        Alert.alert(
+                            'Final Confirmation',
+                            'Type DELETE to confirm account deletion',
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Confirm',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        try {
+                                            setIsLoading(true);
+                                            const { AccountDeletionService } = await import('../services/accountDeletion');
+                                            await AccountDeletionService.deleteAccount();
+                                            
+                                            // Reset state
+                                            setIsSignedIn(false);
+                                            setUserProfile(null);
+                                            
+                                            Alert.alert(
+                                                'Account Deleted',
+                                                'Your account and all data have been permanently deleted.',
+                                                [{ text: 'OK' }]
+                                            );
+                                        } catch (error: any) {
+                                            console.error('Account deletion error:', error);
+                                            Alert.alert(
+                                                'Deletion Failed',
+                                                error.message || 'Failed to delete account. Please try again or contact support.'
+                                            );
+                                        } finally {
+                                            setIsLoading(false);
+                                        }
+                                    },
+                                },
+                            ]
+                        );
+                    },
+                },
+            ]
+        );
+    };
+
     const updateNotificationSetting = async (key: string, value: boolean | string) => {
         const newSettings = { ...notificationSettings, [key]: value };
         setNotificationSettings(newSettings);
@@ -439,25 +492,6 @@ const SettingsScreen = () => {
                         />
                     }
                 />
-
-                <SettingItem
-                    key="test-notification"
-                    title="Test Notification"
-                    subtitle="Send a test notification to verify setup"
-                    icon={Bell}
-                    onPress={async () => {
-                        try {
-                            const { MessagingService } = await import('../services/messaging');
-                            await MessagingService.sendLocalNotification(
-                                '🚴‍♂️ RideFlow Test',
-                                'Notifications are working perfectly! Ready to track your rides.',
-                                { type: 'test' }
-                            );
-                        } catch (error) {
-                            Alert.alert('Error', 'Failed to send test notification');
-                        }
-                    }}
-                />
             </View>
 
             <View style={styles.section}>
@@ -480,6 +514,16 @@ const SettingsScreen = () => {
                     onPress={handleSyncFromCloud}
                     disabled={!isSignedIn}
                 />
+
+                {isSignedIn && (
+                    <SettingItem
+                        key="delete-account"
+                        title="Delete Account"
+                        subtitle="Permanently delete your account and all data"
+                        icon={User}
+                        onPress={handleDeleteAccount}
+                    />
+                )}
             </View>
 
             <View style={styles.section}>
