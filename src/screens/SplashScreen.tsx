@@ -1,8 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Text, Animated, Dimensions, Image } from 'react-native';
+import { View, StyleSheet, Text, Animated } from 'react-native';
 import { colors } from '../theme/colors';
-
-const { width } = Dimensions.get('window');
 
 const SplashScreen = ({ navigation }: any) => {
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -10,25 +8,20 @@ const SplashScreen = ({ navigation }: any) => {
     useEffect(() => {
         Animated.timing(fadeAnim, {
             toValue: 1,
-            duration: 1000,
+            duration: 500,
             useNativeDriver: true,
         }).start();
 
         const timer = setTimeout(() => {
-            // Navigate to AppTabs
+            // Navigate to AppTabs - reduced from 4000ms to 1500ms
             navigation.replace('AppTabs');
-        }, 4000);
+        }, 1500);
 
         return () => clearTimeout(timer);
     }, [navigation]);
 
     return (
         <View style={styles.container}>
-            <Image
-                source={require('../assets/images/logo.jpg')}
-                style={styles.logo}
-                resizeMode="contain"
-            />
             <Animated.View style={{ opacity: fadeAnim }}>
                 <Text style={styles.title}>RideFlow</Text>
                 <Text style={styles.subtitle}>Track Every Mile</Text>
@@ -44,16 +37,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    logo: {
-        width: width * 0.6,
-        height: width * 0.6,
-        marginBottom: 20
-    },
     title: {
         fontSize: 40,
         fontWeight: 'bold',
         color: colors.primary,
-        marginTop: 20,
         textAlign: 'center',
     },
     subtitle: {

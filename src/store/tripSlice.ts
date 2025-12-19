@@ -71,8 +71,12 @@ const tripSlice = createSlice({
         deleteTripById: (state, action: PayloadAction<string>) => {
             state.trips = state.trips.filter(trip => trip.id !== action.payload);
         },
+        restoreActiveTrip: (state, action: PayloadAction<Trip>) => {
+            state.isTracking = true;
+            state.currentTrip = action.payload;
+        },
     },
 });
 
-export const { startTrip, updateTrip, stopTrip, loadTripsFromDB, deleteTripById } = tripSlice.actions;
+export const { startTrip, updateTrip, stopTrip, loadTripsFromDB, deleteTripById, restoreActiveTrip } = tripSlice.actions;
 export default tripSlice.reducer;

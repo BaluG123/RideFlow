@@ -9,12 +9,15 @@ import {
     ScrollView,
     Image,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
+import { loadTripsFromDB } from '../store/tripSlice';
+import { saveTrip, loadTrips } from '../services/database';
 import { colors } from '../theme/colors';
 import { Cloud, CloudOff, Download, Upload, User, Bell, BellOff } from 'lucide-react-native';
 
 const SettingsScreen = () => {
+    const dispatch = useDispatch();
     const { trips } = useSelector((state: RootState) => state.trips);
     const [isSignedIn, setIsSignedIn] = useState(false);
     const [userProfile, setUserProfile] = useState<any>(null);
@@ -189,20 +192,80 @@ const SettingsScreen = () => {
                         try {
                             setIsLoading(true);
                             const { FirebaseService } = await import('../services/firebase');
+                            
+                            // Check if user is signed in
+                            const currentUser = FirebaseService.getCurrentUser();
+                            if (!currentUser) {
+                                Alert.alert(
+                                    'Not Signed In',
+                                    'Please sign in with Google first to sync your data from cloud.',
+                                    [{ text: 'OK' }]
+                                );
+                                setIsLoading(false);
+                                return;
+                            }
+                            
                             const cloudTrips = await FirebaseService.loadTripsFromCloud();
                             
-                            // Here you would merge with local data
-                            // For now, we'll just show the count
-                            Alert.alert(
-                                'Success', 
-                                `Found ${cloudTrips.length} trips in cloud storage. Merging with local data...`
-                            );
+                            if (cloudTrips.length === 0) {
+                                Alert.alert(
+                                    'No Trips',
+                                    'No trips found in cloud storage. Make sure you have synced trips to cloud first.',
+                                    [{ text: 'OK' }]
+                                );
+                                setIsLoading(false);
+                                return;
+                            }
                             
-                            // Reload from local DB to refresh the store
-                            // You might want to implement a proper merge function
-                        } catch (error) {
-                            Alert.alert('Error', 'Failed to sync from cloud.');
+                            // Save each trip to local database (INSERT OR REPLACE will handle duplicates)
+                            let savedCount = 0;
+                            let errorCount = 0;
+                            for (const trip of cloudTrips) {
+                                try {
+                                    // Only save completed trips (trips with endTime)
+                                    // Active trips are handled separately via active_trip state
+                                    if (trip.endTime) {
+                                        await saveTrip(trip, false); // Don't sync back to cloud (already there)
+                                        savedCount++;
+                                    }
+                                } catch (err) {
+                                    console.error(`Error saving trip ${trip.id}:`, err);
+                                    errorCount++;
+                                }
+                            }
+                            
+                            // Reload trips from local DB and update Redux store
+                            const localTrips = await loadTrips();
+                            dispatch(loadTripsFromDB(localTrips));
+                            
+                            if (errorCount > 0) {
+                                Alert.alert(
+                                    'Sync Complete with Errors',
+                                    `Downloaded ${cloudTrips.length} trips. Successfully saved ${savedCount} trip${savedCount !== 1 ? 's' : ''}. ${errorCount} trip${errorCount !== 1 ? 's' : ''} failed to save.`
+                                );
+                            } else {
+                                Alert.alert(
+                                    'Sync Complete', 
+                                    `Downloaded and saved ${savedCount} trip${savedCount !== 1 ? 's' : ''} from cloud storage.`
+                                );
+                            }
+                        } catch (error: any) {
                             console.error('Sync error:', error);
+                            const errorMessage = error?.message || 'Unknown error occurred';
+                            
+                            // Provide more specific error messages
+                            let userMessage = 'Failed to sync from cloud.';
+                            if (errorMessage.includes('No user signed in')) {
+                                userMessage = 'Please sign in with Google first.';
+                            } else if (errorMessage.includes('network') || errorMessage.includes('Network')) {
+                                userMessage = 'Network error. Please check your internet connection and try again.';
+                            } else if (errorMessage.includes('permission') || errorMessage.includes('Permission')) {
+                                userMessage = 'Permission denied. Please check your Firebase security rules.';
+                            } else {
+                                userMessage = `Failed to sync: ${errorMessage}`;
+                            }
+                            
+                            Alert.alert('Sync Failed', userMessage, [{ text: 'OK' }]);
                         } finally {
                             setIsLoading(false);
                         }

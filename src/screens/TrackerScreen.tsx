@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Alert, Platform, PermissionsAndroid, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { useFocusEffect } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store';
-import { startTrip, stopTrip, updateTrip } from '../store/tripSlice';
+import { startTrip, stopTrip, updateTrip, loadTripsFromDB, restoreActiveTrip, Trip } from '../store/tripSlice';
 import { colors } from '../theme/colors';
 import Geolocation from 'react-native-geolocation-service';
 import { Play, Square } from 'lucide-react-native';
 import { LEAFLET_HTML } from '../components/LeafletMapHtml';
-import { saveTrip } from '../services/database';
+import { saveTrip, saveActiveTripState, loadActiveTripState } from '../services/database';
 import { AnalyticsService } from '../services/analytics';
 
 const TrackerScreen = () => {
@@ -23,13 +24,121 @@ const TrackerScreen = () => {
     const watchIdRef = useRef<number | null>(null);
     const appState = useRef(AppState.currentState);
     const lastMapUpdateRef = useRef<number>(0);
-    const locationBufferRef = useRef<{latitude: number, longitude: number}[]>([]);
+    const lastPositionRef = useRef<{ latitude: number; longitude: number } | null>(null);
+    const startTimeRef = useRef<number | null>(null);
+    const currentTripRef = useRef<Trip | null>(null);
+    const coordinatesRef = useRef<{ latitude: number; longitude: number }[]>([]);
+    const isRestoringRef = useRef(false);
 
+    // Keep refs in sync with Redux state and save active trip state
+    useEffect(() => {
+        currentTripRef.current = currentTrip;
+        if (currentTrip) {
+            coordinatesRef.current = currentTrip.coordinates;
+            // Save active trip state periodically while tracking (but not during restoration)
+            if (!isRestoringRef.current) {
+                saveActiveTripState(currentTrip).catch(err => 
+                    console.error('Error saving active trip state:', err)
+                );
+            }
+        } else {
+            // Only clear active trip state when not tracking AND not restoring
+            if (!isRestoringRef.current) {
+                saveActiveTripState(null).catch(err => 
+                    console.error('Error clearing active trip state:', err)
+                );
+            }
+        }
+    }, [currentTrip]);
+
+    // Restore active trip state on mount and when screen is focused
+    useFocusEffect(
+        useCallback(() => {
+            const restoreState = async () => {
+                // Skip if already tracking (to avoid double restoration)
+                if (isTracking) {
+                    console.log('Already tracking, skipping restoration');
+                    return;
+                }
+
+                try {
+                    isRestoringRef.current = true;
+                    const activeTrip = await loadActiveTripState();
+                    if (activeTrip) {
+                        // Check if trip is still valid (not too old - less than 24 hours)
+                        const startTime = activeTrip.startTime ? new Date(activeTrip.startTime).getTime() : 0;
+                        const now = Date.now();
+                        const hoursSinceStart = (now - startTime) / (1000 * 60 * 60);
+                        
+                        if (hoursSinceStart < 24) {
+                            // Update duration to account for time that passed while app was killed
+                            const updatedTrip = {
+                                ...activeTrip,
+                                duration: Math.floor((now - startTime) / 1000)
+                            };
+                            
+                            // Restore the trip state
+                            dispatch(restoreActiveTrip(updatedTrip));
+                            console.log('✅ Active trip restored:', updatedTrip.id, `Duration: ${updatedTrip.duration}s`);
+                            
+                            // Save the updated trip state immediately
+                            await saveActiveTripState(updatedTrip);
+                            
+                            // Restore coordinates ref
+                            coordinatesRef.current = updatedTrip.coordinates;
+                            
+                            // Restore last position if available
+                            if (updatedTrip.coordinates.length > 0) {
+                                const lastCoord = updatedTrip.coordinates[updatedTrip.coordinates.length - 1];
+                                lastPositionRef.current = lastCoord;
+                                setCurrentPosition(lastCoord);
+                                
+                                // Update map with restored path
+                                setTimeout(() => {
+                                    if (webViewRef.current) {
+                                        const data = JSON.stringify({
+                                            latitude: lastCoord.latitude,
+                                            longitude: lastCoord.longitude,
+                                            path: updatedTrip.coordinates
+                                        });
+                                        webViewRef.current.injectJavaScript(`updateMap('${data}'); true;`);
+                                    }
+                                }, 500);
+                            }
+                        } else {
+                            // Trip is too old, clear it
+                            console.log('⚠️ Active trip too old, clearing');
+                            await saveActiveTripState(null);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error restoring active trip:', error);
+                } finally {
+                    isRestoringRef.current = false;
+                }
+            };
+            
+            restoreState();
+        }, [isTracking, dispatch])
+    );
+
+    // Initial setup - request permissions and handle app state
     useEffect(() => {
         requestPermission();
         
         // Handle app state changes for background tracking
         const subscription = AppState.addEventListener('change', nextAppState => {
+            // Save state when going to background
+            if (appState.current === 'active' && nextAppState.match(/inactive|background/)) {
+                console.log('App going to background - saving state');
+                const currentTrip = currentTripRef.current;
+                if (currentTrip) {
+                    saveActiveTripState(currentTrip).catch(err => 
+                        console.error('Error saving active trip state on background:', err)
+                    );
+                }
+            }
+            
             if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
                 console.log('App has come to the foreground!');
                 // Refresh map when coming back from background
@@ -37,7 +146,7 @@ const TrackerScreen = () => {
                     const data = JSON.stringify({
                         latitude: currentPosition.latitude,
                         longitude: currentPosition.longitude,
-                        path: currentTrip?.coordinates || []
+                        path: coordinatesRef.current
                     });
                     webViewRef.current.injectJavaScript(`updateMap('${data}'); true;`);
                 }
@@ -56,20 +165,25 @@ const TrackerScreen = () => {
         setTodayDistance(today);
     }, [trips]);
 
-    // Duration timer
+    // Duration timer - use local timer for accurate display
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
-        if (isTracking && currentTrip) {
+        if (isTracking && currentTrip?.startTime) {
+            startTimeRef.current = new Date(currentTrip.startTime).getTime();
             interval = setInterval(() => {
-                setDuration(currentTrip.duration);
+                if (startTimeRef.current) {
+                    const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+                    setDuration(elapsed);
+                }
             }, 1000);
         } else {
             setDuration(0);
+            startTimeRef.current = null;
         }
         return () => {
             if (interval) clearInterval(interval);
         };
-    }, [isTracking, currentTrip]);
+    }, [isTracking, currentTrip?.startTime]);
 
     const requestPermission = useCallback(async () => {
         if (Platform.OS === 'ios') {
@@ -83,8 +197,34 @@ const TrackerScreen = () => {
         }
     }, []);
 
+    const deg2rad = useCallback((deg: number) => {
+        return deg * (Math.PI / 180);
+    }, []);
+
+    const getDistanceFromLatLonInKm = useCallback((lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 6371; // Radius of the earth in km
+        const dLat = deg2rad(lat2 - lat1);
+        const dLon = deg2rad(lon2 - lon1);
+        const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = R * c; // Distance in km
+        
+        // Round to avoid floating point precision issues
+        return Math.round(distance * 100000) / 100000; // Round to 5 decimal places
+    }, [deg2rad]);
+
     useEffect(() => {
         if (isTracking && permissionGranted) {
+            // Only reset position ref when starting a NEW trip (not restoring)
+            // If currentTrip already has coordinates, we're restoring, so don't reset
+            const isRestoring = currentTrip && currentTrip.coordinates.length > 0;
+            if (!isRestoring) {
+                lastPositionRef.current = null;
+            }
+            
             // Clear any existing watch
             if (watchIdRef.current !== null) {
                 Geolocation.clearWatch(watchIdRef.current);
@@ -102,18 +242,30 @@ const TrackerScreen = () => {
                     }
 
                     let dist = 0;
-                    if (currentPosition) {
-                        const rawDist = getDistanceFromLatLonInKm(currentPosition.latitude, currentPosition.longitude, latitude, longitude);
-                        
+                    const lastPos = lastPositionRef.current;
+                    if (lastPos) {
+                        const rawDist = getDistanceFromLatLonInKm(
+                            lastPos.latitude,
+                            lastPos.longitude,
+                            latitude,
+                            longitude
+                        );
+
                         // Only add distance if movement is significant (more than 5 meters)
                         // This prevents GPS drift from inflating distance
                         if (rawDist >= 0.005) { // 5 meters = 0.005 km
                             dist = rawDist;
                             if (__DEV__) {
+                                const currentTrip = currentTripRef.current;
                                 console.log(`Distance added: ${dist.toFixed(4)} km, Total: ${(currentTrip?.distance || 0) + dist}`);
                             }
                         } else if (__DEV__) {
                             console.log(`Distance too small, ignored: ${rawDist.toFixed(6)} km`);
+                        }
+                    } else {
+                        // First position - initialize but don't add distance
+                        if (__DEV__) {
+                            console.log('First GPS position recorded');
                         }
                     }
 
@@ -123,18 +275,33 @@ const TrackerScreen = () => {
                     setCurrentSpeed(speedKmh > 1 ? speedKmh : 0);
 
                     setCurrentPosition(newLoc);
+                    lastPositionRef.current = newLoc;
                     
                     // Always add location to trip (for route display), but only add distance if meaningful
                     dispatch(updateTrip({ location: newLoc, distanceDelta: dist }));
+                    
+                    // Save active trip state after each significant update (every 5 location updates)
+                    if (coordinatesRef.current.length % 5 === 0) {
+                        const currentTrip = currentTripRef.current;
+                        if (currentTrip) {
+                            saveActiveTripState(currentTrip).catch(err => 
+                                console.error('Error saving active trip state:', err)
+                            );
+                        }
+                    }
 
-                    // Throttle map updates for better performance
+                    // Throttle map updates for better performance - use ref for fresh coordinates
                     const now = Date.now();
                     if (webViewRef.current && appState.current === 'active' && (now - lastMapUpdateRef.current) > 2000) {
                         lastMapUpdateRef.current = now;
+                        // Use ref to get latest coordinates
+                        const currentCoords = coordinatesRef.current.length > 0 
+                            ? coordinatesRef.current 
+                            : [newLoc];
                         const data = JSON.stringify({
                             latitude,
                             longitude,
-                            path: currentTrip?.coordinates || []
+                            path: currentCoords
                         });
                         webViewRef.current.injectJavaScript(`updateMap('${data}'); true;`);
                     }
@@ -163,6 +330,9 @@ const TrackerScreen = () => {
                 }
             };
         } else if (permissionGranted && !isTracking) {
+            // Reset position ref when not tracking
+            lastPositionRef.current = null;
+            
             // Get initial position when not tracking
             Geolocation.getCurrentPosition(
                 (position) => {
@@ -181,7 +351,7 @@ const TrackerScreen = () => {
                 { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
             );
         }
-    }, [isTracking, permissionGranted, dispatch]);
+    }, [isTracking, permissionGranted, dispatch, getDistanceFromLatLonInKm]);
 
     const handleToggleTracking = async () => {
         if (isTracking) {
@@ -218,7 +388,17 @@ const TrackerScreen = () => {
                 // Save to database before stopping
                 try {
                     await saveTrip(enhancedTrip, true); // Enable cloud sync
+                    await saveActiveTripState(null); // Clear active trip state
                     dispatch(stopTrip());
+                    
+                    // Reset refs
+                    lastPositionRef.current = null;
+                    coordinatesRef.current = [];
+                    
+                    // Reload trips to ensure state consistency
+                    const { loadTrips } = await import('../services/database');
+                    const updatedTrips = await loadTrips();
+                    dispatch(loadTripsFromDB(updatedTrips));
                     
                     // Show achievement notifications
                     const newTotalDistance = todayDistance + enhancedTrip.distance;
@@ -230,6 +410,7 @@ const TrackerScreen = () => {
                 } catch (error) {
                     Alert.alert('Error', 'Failed to save trip. Please try again.');
                     console.error('Error saving trip:', error);
+                    // Don't stop trip if save failed - let user retry
                 }
             }
         } else {
@@ -238,28 +419,13 @@ const TrackerScreen = () => {
                 requestPermission();
                 return;
             }
+            // Reset refs when starting new trip
+            lastPositionRef.current = null;
+            coordinatesRef.current = [];
             dispatch(startTrip());
+            // Active trip state will be saved automatically by the useEffect watching currentTrip
         }
     };
-
-    const getDistanceFromLatLonInKm = useCallback((lat1: number, lon1: number, lat2: number, lon2: number) => {
-        const R = 6371; // Radius of the earth in km
-        const dLat = deg2rad(lat2 - lat1);
-        const dLon = deg2rad(lon2 - lon1);
-        const a =
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const distance = R * c; // Distance in km
-        
-        // Round to avoid floating point precision issues
-        return Math.round(distance * 100000) / 100000; // Round to 5 decimal places
-    }, []);
-
-    const deg2rad = useCallback((deg: number) => {
-        return deg * (Math.PI / 180);
-    }, []);
 
     const formatDuration = useCallback((seconds: number): string => {
         const hours = Math.floor(seconds / 3600);
@@ -281,7 +447,6 @@ const TrackerScreen = () => {
                 source={{ html: LEAFLET_HTML }}
                 javaScriptEnabled
                 domStorageEnabled
-                androidHardwareAccelerationDisabled={false}
                 androidLayerType="hardware"
                 cacheEnabled={true}
                 startInLoadingState={false}

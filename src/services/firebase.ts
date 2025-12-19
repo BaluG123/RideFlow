@@ -153,6 +153,23 @@ export class FirebaseService {
         }
     }
 
+    // Helper function to sanitize trip data for Firestore (convert undefined to null)
+    private static sanitizeTripForFirestore(trip: Trip, userId: string): any {
+        return {
+            id: trip.id,
+            date: trip.date,
+            distance: trip.distance,
+            duration: trip.duration,
+            coordinates: trip.coordinates,
+            avgSpeed: trip.avgSpeed ?? null,
+            maxSpeed: trip.maxSpeed ?? null,
+            calories: trip.calories ?? null,
+            startTime: trip.startTime ?? null,
+            endTime: trip.endTime ?? null,
+            userId: userId,
+        };
+    }
+
     // Firestore operations
     static async syncTripToCloud(trip: Trip) {
         try {
@@ -162,14 +179,14 @@ export class FirebaseService {
                 return;
             }
 
-            const tripWithUserId = { ...trip, userId: user.uid };
+            const sanitizedTrip = this.sanitizeTripForFirestore(trip, user.uid);
             
             await firestore()
                 .collection('users')
                 .doc(user.uid)
                 .collection('trips')
                 .doc(trip.id)
-                .set(tripWithUserId);
+                .set(sanitizedTrip);
 
             console.log('✅ Trip synced to cloud:', trip.id);
         } catch (error) {
@@ -182,16 +199,33 @@ export class FirebaseService {
         try {
             const user = this.getCurrentUser();
             if (!user) {
-                console.log('No user signed in, cannot load from cloud');
-                return [];
+                const error = new Error('No user signed in, cannot load from cloud');
+                console.log(error.message);
+                throw error;
             }
 
-            const snapshot = await firestore()
-                .collection('users')
-                .doc(user.uid)
-                .collection('trips')
-                .orderBy('date', 'desc')
-                .get();
+            let snapshot;
+            try {
+                snapshot = await firestore()
+                    .collection('users')
+                    .doc(user.uid)
+                    .collection('trips')
+                    .orderBy('date', 'desc')
+                    .get();
+            } catch (queryError: any) {
+                // Handle missing index error
+                if (queryError?.code === 'failed-precondition' || queryError?.message?.includes('index')) {
+                    console.warn('⚠️ Firestore index missing, trying without orderBy...');
+                    // Try without orderBy as fallback
+                    snapshot = await firestore()
+                        .collection('users')
+                        .doc(user.uid)
+                        .collection('trips')
+                        .get();
+                } else {
+                    throw queryError;
+                }
+            }
 
             const trips: Trip[] = [];
             snapshot.forEach(doc => {
@@ -199,23 +233,34 @@ export class FirebaseService {
                 trips.push({
                     id: data.id,
                     date: data.date,
-                    distance: data.distance,
-                    duration: data.duration,
-                    coordinates: data.coordinates,
-                    avgSpeed: data.avgSpeed,
-                    maxSpeed: data.maxSpeed,
-                    calories: data.calories,
-                    startTime: data.startTime,
-                    endTime: data.endTime,
-                    userId: data.userId,
+                    distance: data.distance ?? 0,
+                    duration: data.duration ?? 0,
+                    coordinates: data.coordinates ?? [],
+                    // Convert null to undefined for optional fields
+                    avgSpeed: data.avgSpeed !== null && data.avgSpeed !== undefined ? data.avgSpeed : undefined,
+                    maxSpeed: data.maxSpeed !== null && data.maxSpeed !== undefined ? data.maxSpeed : undefined,
+                    calories: data.calories !== null && data.calories !== undefined ? data.calories : undefined,
+                    startTime: data.startTime !== null && data.startTime !== undefined ? data.startTime : undefined,
+                    endTime: data.endTime !== null && data.endTime !== undefined ? data.endTime : undefined,
+                    userId: data.userId !== null && data.userId !== undefined ? data.userId : undefined,
                 });
+            });
+
+            // Sort manually if we couldn't use orderBy
+            trips.sort((a, b) => {
+                const dateA = new Date(a.date).getTime();
+                const dateB = new Date(b.date).getTime();
+                return dateB - dateA; // Descending order
             });
 
             console.log(`✅ Loaded ${trips.length} trips from cloud`);
             return trips;
-        } catch (error) {
+        } catch (error: any) {
             console.error('❌ Error loading trips from cloud:', error);
-            return [];
+            // Re-throw with more context
+            const errorMessage = error?.message || 'Unknown error';
+            const errorCode = error?.code || 'unknown';
+            throw new Error(`Failed to load trips: ${errorMessage} (${errorCode})`);
         }
     }
 
@@ -253,8 +298,8 @@ export class FirebaseService {
                 .collection('trips');
 
             trips.forEach(trip => {
-                const tripWithUserId = { ...trip, userId: user.uid };
-                batch.set(userTripsRef.doc(trip.id), tripWithUserId);
+                const sanitizedTrip = this.sanitizeTripForFirestore(trip, user.uid);
+                batch.set(userTripsRef.doc(trip.id), sanitizedTrip);
             });
 
             await batch.commit();

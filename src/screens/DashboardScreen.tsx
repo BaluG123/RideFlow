@@ -5,13 +5,11 @@ import { RootState } from '../store';
 import TripCard from '../components/TripCard';
 import { colors } from '../theme/colors';
 import { loadTripsFromDB } from '../store/tripSlice';
-import { UserCircle } from 'lucide-react-native';
 import { initDatabase, loadTrips } from '../services/database';
 
 const DashboardScreen = ({ navigation }: any) => {
     const dispatch = useDispatch();
     const trips = useSelector((state: RootState) => state.trips.trips);
-    const { isGuest, profile } = useSelector((state: RootState) => state.user || { isGuest: true, profile: null }); // fallback
 
     useEffect(() => {
         // Initialize database and load trips
@@ -27,15 +25,6 @@ const DashboardScreen = ({ navigation }: any) => {
 
     return (
         <View style={styles.container}>
-            {!isGuest ? null : (
-                <View style={styles.guestBanner}>
-                    <Text style={styles.guestText}>You are using a Guest Account.</Text>
-                    <TouchableOpacity style={styles.guestButton} onPress={() => navigation.navigate('Profile')}>
-                        <Text style={styles.guestButtonText}>Create Profile</Text>
-                    </TouchableOpacity>
-                </View>
-            )}
-
             <View style={styles.summaryContainer}>
                 <Image
                     source={require('../assets/images/logo.jpg')}
@@ -65,75 +54,43 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: colors.background,
     },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 20,
-        paddingTop: 60, // Safe area for iOS status bar
-        backgroundColor: colors.white,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: colors.text
-    },
-    guestBanner: {
-        backgroundColor: colors.primary + '20', // Opacity
-        padding: 10,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: 20
-    },
-    guestText: {
-        color: colors.primary,
-        fontWeight: '500'
-    },
-    guestButton: {
-        backgroundColor: colors.white,
-        paddingVertical: 5,
-        paddingHorizontal: 10,
-        borderRadius: 15
-    },
-    guestButtonText: {
-        color: colors.primary,
-        fontSize: 12,
-        fontWeight: 'bold'
-    },
     summaryContainer: {
         alignItems: 'center',
-        padding: 20,
+        padding: 24,
         backgroundColor: colors.white,
         marginBottom: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
     },
     logo: {
-        width: 120,
-        height: 120,
-        marginBottom: 10
+        width: 100,
+        height: 100,
+        marginBottom: 12
     },
     totalDistance: {
-        fontSize: 36,
+        fontSize: 42,
         fontWeight: 'bold',
         color: colors.primary,
+        marginBottom: 4,
     },
     totalLabel: {
-        fontSize: 14,
+        fontSize: 15,
         color: colors.gray,
+        fontWeight: '500',
     },
     listContent: {
         padding: 16,
     },
     sectionTitle: {
-        fontSize: 18,
+        fontSize: 20,
         fontWeight: 'bold',
         color: colors.text,
-        marginBottom: 10,
+        marginBottom: 12,
+        marginTop: 4,
     }
 });
-
-import { Alert } from 'react-native';
 
 export default DashboardScreen;

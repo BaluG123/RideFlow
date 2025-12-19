@@ -1,13 +1,14 @@
-import React from 'react';
-import { View, StyleSheet, Text, ScrollView, Dimensions, TouchableOpacity, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, StyleSheet, Text, ScrollView, Dimensions, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { useDispatch } from 'react-redux';
 import { colors } from '../theme/colors';
-import { MapPin, Calendar, Clock, Trash2 } from 'lucide-react-native';
+import { MapPin, Calendar, Clock, Trash2, Navigation } from 'lucide-react-native';
 import { Trip } from '../store/tripSlice';
 import { deleteTripById } from '../store/tripSlice';
 import { deleteTrip } from '../services/database';
+import { getTripPlaceNames, PlaceName } from '../utils/geocoding';
 
 const { width, height } = Dimensions.get('window');
 
@@ -16,6 +17,11 @@ const TripDetailScreen = () => {
     const navigation = useNavigation();
     const dispatch = useDispatch();
     const trip = (route.params as any)?.trip as Trip;
+    const [placeNames, setPlaceNames] = useState<{ start: PlaceName | null; end: PlaceName | null }>({
+        start: null,
+        end: null,
+    });
+    const [loadingPlaces, setLoadingPlaces] = useState(true);
 
     if (!trip) {
         return (
@@ -56,7 +62,9 @@ const TripDetailScreen = () => {
                             Alert.alert('Success', 'Trip deleted successfully!');
                         } catch (error) {
                             Alert.alert('Error', 'Failed to delete trip. Please try again.');
-                            console.error('Error deleting trip:', error);
+                            if (__DEV__) {
+                                console.error('Error deleting trip:', error);
+                            }
                         }
                     },
                 },
@@ -66,6 +74,37 @@ const TripDetailScreen = () => {
 
     const startPoint = trip.coordinates[0];
     const endPoint = trip.coordinates[trip.coordinates.length - 1];
+
+    useEffect(() => {
+        // Load place names when component mounts
+        const loadPlaceNames = async () => {
+            if (startPoint && endPoint) {
+                setLoadingPlaces(true);
+                try {
+                    const places = await getTripPlaceNames(
+                        startPoint.latitude,
+                        startPoint.longitude,
+                        endPoint.latitude,
+                        endPoint.longitude
+                    );
+                    setPlaceNames(places);
+                } catch (error) {
+                    if (__DEV__) {
+                        console.error('Error loading place names:', error);
+                    }
+                    // Fallback to coordinates
+                    setPlaceNames({
+                        start: { name: `${startPoint.latitude.toFixed(4)}, ${startPoint.longitude.toFixed(4)}` },
+                        end: { name: `${endPoint.latitude.toFixed(4)}, ${endPoint.longitude.toFixed(4)}` },
+                    });
+                } finally {
+                    setLoadingPlaces(false);
+                }
+            }
+        };
+
+        loadPlaceNames();
+    }, [startPoint, endPoint]);
 
     const mapHtml = `
 <!DOCTYPE html>
@@ -138,45 +177,92 @@ const TripDetailScreen = () => {
             </View>
 
             <View style={styles.detailsContainer}>
-                <View style={styles.statRow}>
-                    <View style={styles.stat}>
-                        <MapPin size={20} color={colors.primary} />
-                        <Text style={styles.statValue}>{trip.distance.toFixed(2)} km</Text>
-                        <Text style={styles.statLabel}>Distance</Text>
-                    </View>
-                    <View style={styles.stat}>
-                        <Clock size={20} color={colors.primary} />
-                        <Text style={styles.statValue}>{formatDuration(trip.duration)}</Text>
-                        <Text style={styles.statLabel}>Duration</Text>
-                    </View>
-                </View>
-
-                <View style={styles.dateContainer}>
-                    <Calendar size={16} color={colors.gray} />
-                    <Text style={styles.dateText}>{formatDate(trip.date)}</Text>
-                </View>
-
-                {startPoint && endPoint && (
-                    <View style={styles.locationInfo}>
-                        <View style={styles.locationRow}>
-                            <View style={[styles.marker, { backgroundColor: colors.primary }]} />
-                            <Text style={styles.locationText}>
-                                Start: {startPoint.latitude.toFixed(4)}, {startPoint.longitude.toFixed(4)}
-                            </Text>
+                <ScrollView 
+                    style={styles.scrollView}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={true}
+                >
+                    <View style={styles.statRow}>
+                        <View style={styles.stat}>
+                            <MapPin size={20} color={colors.primary} />
+                            <Text style={styles.statValue}>{trip.distance.toFixed(2)} km</Text>
+                            <Text style={styles.statLabel}>Distance</Text>
                         </View>
-                        <View style={styles.locationRow}>
-                            <View style={[styles.marker, { backgroundColor: colors.error }]} />
-                            <Text style={styles.locationText}>
-                                End: {endPoint.latitude.toFixed(4)}, {endPoint.longitude.toFixed(4)}
-                            </Text>
+                        <View style={styles.stat}>
+                            <Clock size={20} color={colors.primary} />
+                            <Text style={styles.statValue}>{formatDuration(trip.duration)}</Text>
+                            <Text style={styles.statLabel}>Duration</Text>
                         </View>
                     </View>
-                )}
 
-                <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteTrip}>
-                    <Trash2 size={20} color={colors.white} />
-                    <Text style={styles.deleteButtonText}>Delete Trip</Text>
-                </TouchableOpacity>
+                    <View style={styles.dateContainer}>
+                        <Calendar size={16} color={colors.gray} />
+                        <Text style={styles.dateText}>{formatDate(trip.date)}</Text>
+                    </View>
+
+                    {startPoint && endPoint && (
+                        <View style={styles.locationInfo}>
+                            <Text style={styles.locationSectionTitle}>Route Details</Text>
+                            
+                            <View style={styles.locationCard}>
+                                <View style={styles.locationRow}>
+                                    <View style={[styles.marker, { backgroundColor: colors.primary }]} />
+                                    <View style={styles.locationContent}>
+                                        <Text style={styles.locationLabel}>Start Location</Text>
+                                        {loadingPlaces ? (
+                                            <View style={styles.loadingContainer}>
+                                                <ActivityIndicator size="small" color={colors.primary} />
+                                                <Text style={styles.locationText}>Loading...</Text>
+                                            </View>
+                                        ) : (
+                                            <>
+                                                <Text style={styles.locationName} numberOfLines={2}>
+                                                    {placeNames.start?.name || `${startPoint.latitude.toFixed(4)}, ${startPoint.longitude.toFixed(4)}`}
+                                                </Text>
+                                                {placeNames.start?.address && placeNames.start.address !== placeNames.start.name && (
+                                                    <Text style={styles.locationAddress} numberOfLines={1}>
+                                                        {placeNames.start.address}
+                                                    </Text>
+                                                )}
+                                            </>
+                                        )}
+                                    </View>
+                                </View>
+                            </View>
+
+                            <View style={styles.locationCard}>
+                                <View style={styles.locationRow}>
+                                    <View style={[styles.marker, { backgroundColor: colors.error }]} />
+                                    <View style={styles.locationContent}>
+                                        <Text style={styles.locationLabel}>End Location</Text>
+                                        {loadingPlaces ? (
+                                            <View style={styles.loadingContainer}>
+                                                <ActivityIndicator size="small" color={colors.error} />
+                                                <Text style={styles.locationText}>Loading...</Text>
+                                            </View>
+                                        ) : (
+                                            <>
+                                                <Text style={styles.locationName} numberOfLines={2}>
+                                                    {placeNames.end?.name || `${endPoint.latitude.toFixed(4)}, ${endPoint.longitude.toFixed(4)}`}
+                                                </Text>
+                                                {placeNames.end?.address && placeNames.end.address !== placeNames.end.name && (
+                                                    <Text style={styles.locationAddress} numberOfLines={1}>
+                                                        {placeNames.end.address}
+                                                    </Text>
+                                                )}
+                                            </>
+                                        )}
+                                    </View>
+                                </View>
+                            </View>
+                        </View>
+                    )}
+
+                    <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteTrip}>
+                        <Trash2 size={20} color={colors.white} />
+                        <Text style={styles.deleteButtonText}>Delete Trip</Text>
+                    </TouchableOpacity>
+                </ScrollView>
             </View>
         </View>
     );
@@ -195,11 +281,17 @@ const styles = StyleSheet.create({
     },
     detailsContainer: {
         flex: 1,
-        padding: 20,
         backgroundColor: colors.white,
         borderTopLeftRadius: 30,
         borderTopRightRadius: 30,
         marginTop: -30,
+    },
+    scrollView: {
+        flex: 1,
+    },
+    scrollContent: {
+        padding: 20,
+        paddingBottom: 30,
     },
     statRow: {
         flexDirection: 'row',
@@ -233,20 +325,62 @@ const styles = StyleSheet.create({
     },
     locationInfo: {
         marginTop: 10,
+        marginBottom: 10,
+    },
+    locationSectionTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: colors.text,
+        marginBottom: 12,
+    },
+    locationCard: {
+        backgroundColor: colors.background,
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     locationRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 10,
-        gap: 10,
+        alignItems: 'flex-start',
+        gap: 12,
     },
     marker: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        marginTop: 2,
+    },
+    locationContent: {
+        flex: 1,
+    },
+    locationLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: colors.gray,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 4,
+    },
+    locationName: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: colors.text,
+        marginBottom: 2,
+    },
+    locationAddress: {
+        fontSize: 12,
+        color: colors.gray,
+        marginTop: 2,
+    },
+    loadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
     },
     locationText: {
-        color: colors.text,
+        color: colors.gray,
         fontSize: 12,
     },
     deleteButton: {
