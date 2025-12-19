@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Alert, Platform, PermissionsAndroid, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useDispatch, useSelector } from 'react-redux';
@@ -6,7 +6,7 @@ import { RootState } from '../store';
 import { startTrip, stopTrip, updateTrip } from '../store/tripSlice';
 import { colors } from '../theme/colors';
 import Geolocation from 'react-native-geolocation-service';
-import { Play, Square, Clock } from 'lucide-react-native';
+import { Play, Square } from 'lucide-react-native';
 import { LEAFLET_HTML } from '../components/LeafletMapHtml';
 import { saveTrip } from '../services/database';
 import { AnalyticsService } from '../services/analytics';
@@ -22,6 +22,8 @@ const TrackerScreen = () => {
     const webViewRef = useRef<WebView>(null);
     const watchIdRef = useRef<number | null>(null);
     const appState = useRef(AppState.currentState);
+    const lastMapUpdateRef = useRef<number>(0);
+    const locationBufferRef = useRef<{latitude: number, longitude: number}[]>([]);
 
     useEffect(() => {
         requestPermission();
@@ -69,7 +71,7 @@ const TrackerScreen = () => {
         };
     }, [isTracking, currentTrip]);
 
-    const requestPermission = async () => {
+    const requestPermission = useCallback(async () => {
         if (Platform.OS === 'ios') {
             const auth = await Geolocation.requestAuthorization('whenInUse');
             if (auth === 'granted') setPermissionGranted(true);
@@ -79,7 +81,7 @@ const TrackerScreen = () => {
             );
             if (granted === PermissionsAndroid.RESULTS.GRANTED) setPermissionGranted(true);
         }
-    };
+    }, []);
 
     useEffect(() => {
         if (isTracking && permissionGranted) {
@@ -90,23 +92,45 @@ const TrackerScreen = () => {
 
             const watchId = Geolocation.watchPosition(
                 (position) => {
-                    const { latitude, longitude, speed } = position.coords;
+                    const { latitude, longitude, speed, accuracy } = position.coords;
                     const newLoc = { latitude, longitude };
+
+                    // Only process location updates with good accuracy (less than 50 meters)
+                    if (accuracy && accuracy > 50) {
+                        console.log('Poor GPS accuracy, skipping update:', accuracy);
+                        return;
+                    }
 
                     let dist = 0;
                     if (currentPosition) {
-                        dist = getDistanceFromLatLonInKm(currentPosition.latitude, currentPosition.longitude, latitude, longitude);
+                        const rawDist = getDistanceFromLatLonInKm(currentPosition.latitude, currentPosition.longitude, latitude, longitude);
+                        
+                        // Only add distance if movement is significant (more than 5 meters)
+                        // This prevents GPS drift from inflating distance
+                        if (rawDist >= 0.005) { // 5 meters = 0.005 km
+                            dist = rawDist;
+                            if (__DEV__) {
+                                console.log(`Distance added: ${dist.toFixed(4)} km, Total: ${(currentTrip?.distance || 0) + dist}`);
+                            }
+                        } else if (__DEV__) {
+                            console.log(`Distance too small, ignored: ${rawDist.toFixed(6)} km`);
+                        }
                     }
 
-                    // Update current speed (convert m/s to km/h)
+                    // Update current speed (convert m/s to km/h, with minimum threshold)
                     const speedKmh = speed ? Math.max(0, speed * 3.6) : 0;
-                    setCurrentSpeed(speedKmh);
+                    // Only show speed if it's above walking pace (1 km/h) to reduce noise
+                    setCurrentSpeed(speedKmh > 1 ? speedKmh : 0);
 
                     setCurrentPosition(newLoc);
+                    
+                    // Always add location to trip (for route display), but only add distance if meaningful
                     dispatch(updateTrip({ location: newLoc, distanceDelta: dist }));
 
-                    // Update Leaflet Map only if app is in foreground
-                    if (webViewRef.current && appState.current === 'active') {
+                    // Throttle map updates for better performance
+                    const now = Date.now();
+                    if (webViewRef.current && appState.current === 'active' && (now - lastMapUpdateRef.current) > 2000) {
+                        lastMapUpdateRef.current = now;
                         const data = JSON.stringify({
                             latitude,
                             longitude,
@@ -121,11 +145,12 @@ const TrackerScreen = () => {
                 },
                 { 
                     enableHighAccuracy: true, 
-                    distanceFilter: 10, 
-                    interval: 2000,
-                    fastestInterval: 1000,
+                    distanceFilter: 8, // Optimized for physical devices
+                    interval: 4000, // Optimized for battery life
+                    fastestInterval: 3000,
                     forceRequestLocation: true,
-                    showLocationDialog: true
+                    showLocationDialog: true,
+                    useSignificantChanges: false // Better for continuous tracking
                 }
             );
             
@@ -161,6 +186,27 @@ const TrackerScreen = () => {
     const handleToggleTracking = async () => {
         if (isTracking) {
             if (currentTrip) {
+                // Check if trip has meaningful distance (at least 10 meters)
+                if (currentTrip.distance < 0.01) {
+                    Alert.alert(
+                        'Trip Too Short',
+                        'This trip is too short to save. Try moving at least 10 meters.',
+                        [
+                            {
+                                text: 'Continue Tracking',
+                                style: 'cancel'
+                            },
+                            {
+                                text: 'Discard Trip',
+                                onPress: () => {
+                                    dispatch(stopTrip());
+                                }
+                            }
+                        ]
+                    );
+                    return;
+                }
+
                 // Calculate additional trip data
                 const enhancedTrip = {
                     ...currentTrip,
@@ -179,7 +225,7 @@ const TrackerScreen = () => {
                     
                     Alert.alert(
                         'Trip Completed! 🎉', 
-                        `Distance: ${enhancedTrip.distance.toFixed(2)} km\nCalories: ${enhancedTrip.calories} cal\n\n${newTotalDistance >= 10 ? '🏆 Great ride today!' : '🚴‍♂️ Keep it up!'}`
+                        `Distance: ${enhancedTrip.distance.toFixed(2)} km\nDuration: ${formatDuration(enhancedTrip.duration)}\nCalories: ${enhancedTrip.calories} cal\n\n${newTotalDistance >= 10 ? '🏆 Great ride today!' : '🚴‍♂️ Keep it up!'}`
                     );
                 } catch (error) {
                     Alert.alert('Error', 'Failed to save trip. Please try again.');
@@ -190,33 +236,32 @@ const TrackerScreen = () => {
             if (!permissionGranted) {
                 Alert.alert('Permission needed', 'Please enable location permissions');
                 requestPermission();
-                setPermissionGranted(true);
-                dispatch(startTrip());
                 return;
             }
             dispatch(startTrip());
         }
     };
 
-    function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-        var R = 6371;
-        var dLat = deg2rad(lat2 - lat1);
-        var dLon = deg2rad(lon2 - lon1);
-        var a =
+    const getDistanceFromLatLonInKm = useCallback((lat1: number, lon1: number, lat2: number, lon2: number) => {
+        const R = 6371; // Radius of the earth in km
+        const dLat = deg2rad(lat2 - lat1);
+        const dLon = deg2rad(lon2 - lon1);
+        const a =
             Math.sin(dLat / 2) * Math.sin(dLat / 2) +
             Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2)
-            ;
-        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        var d = R * c;
-        return d;
-    }
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = R * c; // Distance in km
+        
+        // Round to avoid floating point precision issues
+        return Math.round(distance * 100000) / 100000; // Round to 5 decimal places
+    }, []);
 
-    function deg2rad(deg: number) {
-        return deg * (Math.PI / 180)
-    }
+    const deg2rad = useCallback((deg: number) => {
+        return deg * (Math.PI / 180);
+    }, []);
 
-    function formatDuration(seconds: number): string {
+    const formatDuration = useCallback((seconds: number): string => {
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         const secs = seconds % 60;
@@ -225,7 +270,7 @@ const TrackerScreen = () => {
             return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         }
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
-    }
+    }, []);
 
     return (
         <View style={styles.container}>
@@ -236,6 +281,11 @@ const TrackerScreen = () => {
                 source={{ html: LEAFLET_HTML }}
                 javaScriptEnabled
                 domStorageEnabled
+                androidHardwareAccelerationDisabled={false}
+                androidLayerType="hardware"
+                cacheEnabled={true}
+                startInLoadingState={false}
+                renderToHardwareTextureAndroid={true}
             />
 
             <View style={styles.overlay}>
