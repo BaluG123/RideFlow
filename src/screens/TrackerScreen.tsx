@@ -1,25 +1,38 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, StyleSheet, Text, TouchableOpacity, Alert, Platform, PermissionsAndroid, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useFocusEffect } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store';
-import { startTrip, stopTrip, updateTrip, loadTripsFromDB, restoreActiveTrip, Trip } from '../store/tripSlice';
+import { 
+    startTrip, 
+    pauseTrip, 
+    resumeTrip, 
+    finishTrip, 
+    updateTrip, 
+    loadTripsFromDB, 
+    restoreActiveTrip, 
+    resetTrackingStatus,
+    Trip 
+} from '../store/tripSlice';
 import { colors } from '../theme/colors';
 import Geolocation from 'react-native-geolocation-service';
-import { Play, Square } from 'lucide-react-native';
+import { Play, Pause, Square, Flag } from 'lucide-react-native';
 import { LEAFLET_HTML } from '../components/LeafletMapHtml';
 import { saveTrip, saveActiveTripState, loadActiveTripState } from '../services/database';
 import { AnalyticsService } from '../services/analytics';
+import { BackgroundTrackingService } from '../services/backgroundTracking';
+import TripNameModal from '../components/TripNameModal';
 
 const TrackerScreen = () => {
     const dispatch = useDispatch();
-    const { isTracking, currentTrip, trips } = useSelector((state: RootState) => state.trips);
+    const { isTracking, isPaused, currentTrip, trips, trackingStatus } = useSelector((state: RootState) => state.trips);
     const [permissionGranted, setPermissionGranted] = useState(false);
     const [currentPosition, setCurrentPosition] = useState<{ latitude: number; longitude: number } | null>(null);
     const [todayDistance, setTodayDistance] = useState(0);
     const [currentSpeed, setCurrentSpeed] = useState(0);
     const [duration, setDuration] = useState(0);
+    const [showTripNameModal, setShowTripNameModal] = useState(false);
     const webViewRef = useRef<WebView>(null);
     const watchIdRef = useRef<number | null>(null);
     const appState = useRef(AppState.currentState);
@@ -35,13 +48,20 @@ const TrackerScreen = () => {
         currentTripRef.current = currentTrip;
         if (currentTrip) {
             coordinatesRef.current = currentTrip.coordinates;
+            
+            // Update Firebase background tracking service with latest trip data
+            BackgroundTrackingService.updateTripData(currentTrip, isPaused);
+            
             // Save active trip state periodically while tracking (but not during restoration)
             if (!isRestoringRef.current) {
-                saveActiveTripState(currentTrip).catch(err => 
+                saveActiveTripState(currentTrip, isPaused).catch(err => 
                     console.error('Error saving active trip state:', err)
                 );
             }
         } else {
+            // Stop Firebase background tracking when no current trip
+            BackgroundTrackingService.stopTracking();
+            
             // Only clear active trip state when not tracking AND not restoring
             if (!isRestoringRef.current) {
                 saveActiveTripState(null).catch(err => 
@@ -49,7 +69,7 @@ const TrackerScreen = () => {
                 );
             }
         }
-    }, [currentTrip]);
+    }, [currentTrip, isPaused]);
 
     // Restore active trip state on mount and when screen is focused
     useFocusEffect(
@@ -72,9 +92,13 @@ const TrackerScreen = () => {
                         
                         if (hoursSinceStart < 24) {
                             // Update duration to account for time that passed while app was killed
+                            const totalElapsed = Math.floor((now - startTime) / 1000);
+                            const pausedTime = activeTrip.pausedTime || 0;
+                            
                             const updatedTrip = {
                                 ...activeTrip,
-                                duration: Math.floor((now - startTime) / 1000)
+                                duration: totalElapsed,
+                                activeDuration: totalElapsed - pausedTime
                             };
                             
                             // Restore the trip state
@@ -82,7 +106,7 @@ const TrackerScreen = () => {
                             console.log('✅ Active trip restored:', updatedTrip.id, `Duration: ${updatedTrip.duration}s`);
                             
                             // Save the updated trip state immediately
-                            await saveActiveTripState(updatedTrip);
+                            await saveActiveTripState(updatedTrip, activeTrip.isPaused);
                             
                             // Restore coordinates ref
                             coordinatesRef.current = updatedTrip.coordinates;
@@ -126,6 +150,34 @@ const TrackerScreen = () => {
     useEffect(() => {
         requestPermission();
         
+        // Initialize Firebase-based background tracking service
+        BackgroundTrackingService.initialize();
+        
+        // Check for pending notification actions
+        const checkPendingActions = async () => {
+            const pendingAction = await BackgroundTrackingService.getPendingNotificationAction();
+            
+            if (pendingAction && currentTrip) {
+                switch (pendingAction) {
+                    case 'pause':
+                        if (!isPaused) {
+                            dispatch(pauseTrip());
+                        }
+                        break;
+                    case 'resume':
+                        if (isPaused) {
+                            dispatch(resumeTrip());
+                        }
+                        break;
+                    case 'finish':
+                        handleFinishTrip();
+                        break;
+                }
+            }
+        };
+        
+        checkPendingActions();
+        
         // Handle app state changes for background tracking
         const subscription = AppState.addEventListener('change', nextAppState => {
             // Save state when going to background
@@ -133,14 +185,24 @@ const TrackerScreen = () => {
                 console.log('App going to background - saving state');
                 const currentTrip = currentTripRef.current;
                 if (currentTrip) {
-                    saveActiveTripState(currentTrip).catch(err => 
+                    saveActiveTripState(currentTrip, isPaused).catch(err => 
                         console.error('Error saving active trip state on background:', err)
                     );
+                    
+                    // Show Firebase background tracking notifications
+                    BackgroundTrackingService.handleAppStateChange(nextAppState, currentTrip, isPaused);
                 }
             }
             
             if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
                 console.log('App has come to the foreground!');
+                
+                // Hide background tracking notifications
+                BackgroundTrackingService.handleAppStateChange(nextAppState, null, false);
+                
+                // Check for pending notification actions
+                checkPendingActions();
+                
                 // Refresh map when coming back from background
                 if (isTracking && currentPosition && webViewRef.current) {
                     const data = JSON.stringify({
@@ -157,7 +219,7 @@ const TrackerScreen = () => {
         return () => {
             subscription.remove();
         };
-    }, []);
+    }, [isPaused, currentTrip, dispatch]);
 
     useEffect(() => {
         // Calculate today's distance whenever trips change
@@ -168,14 +230,18 @@ const TrackerScreen = () => {
     // Duration timer - use local timer for accurate display
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
-        if (isTracking && currentTrip?.startTime) {
+        if (isTracking && currentTrip?.startTime && !isPaused) {
             startTimeRef.current = new Date(currentTrip.startTime).getTime();
             interval = setInterval(() => {
                 if (startTimeRef.current) {
                     const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
-                    setDuration(elapsed);
+                    const pausedTime = currentTrip.pausedTime || 0;
+                    setDuration(elapsed - pausedTime);
                 }
             }, 1000);
+        } else if (currentTrip) {
+            // Set duration from current trip when paused
+            setDuration(currentTrip.activeDuration || 0);
         } else {
             setDuration(0);
             startTimeRef.current = null;
@@ -183,7 +249,7 @@ const TrackerScreen = () => {
         return () => {
             if (interval) clearInterval(interval);
         };
-    }, [isTracking, currentTrip?.startTime]);
+    }, [isTracking, isPaused, currentTrip?.startTime, currentTrip?.pausedTime, currentTrip?.activeDuration]);
 
     const requestPermission = useCallback(async () => {
         if (Platform.OS === 'ios') {
@@ -217,7 +283,7 @@ const TrackerScreen = () => {
     }, [deg2rad]);
 
     useEffect(() => {
-        if (isTracking && permissionGranted) {
+        if (isTracking && permissionGranted && !isPaused) {
             // Only reset position ref when starting a NEW trip (not restoring)
             // If currentTrip already has coordinates, we're restoring, so don't reset
             const isRestoring = currentTrip && currentTrip.coordinates.length > 0;
@@ -278,13 +344,13 @@ const TrackerScreen = () => {
                     lastPositionRef.current = newLoc;
                     
                     // Always add location to trip (for route display), but only add distance if meaningful
-                    dispatch(updateTrip({ location: newLoc, distanceDelta: dist }));
+                    dispatch(updateTrip({ location: newLoc, distanceDelta: dist, speed: speedKmh }));
                     
                     // Save active trip state after each significant update (every 5 location updates)
                     if (coordinatesRef.current.length % 5 === 0) {
                         const currentTrip = currentTripRef.current;
                         if (currentTrip) {
-                            saveActiveTripState(currentTrip).catch(err => 
+                            saveActiveTripState(currentTrip, isPaused).catch(err => 
                                 console.error('Error saving active trip state:', err)
                             );
                         }
@@ -350,80 +416,139 @@ const TrackerScreen = () => {
                 (error) => console.log('Initial position error:', error),
                 { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
             );
+        } else if (watchIdRef.current !== null) {
+            // Clear watch when paused
+            Geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
         }
-    }, [isTracking, permissionGranted, dispatch, getDistanceFromLatLonInKm]);
+    }, [isTracking, isPaused, permissionGranted, dispatch, getDistanceFromLatLonInKm]);
 
-    const handleToggleTracking = async () => {
-        if (isTracking) {
+    const handleStartTrip = () => {
+        if (!permissionGranted) {
+            Alert.alert('Permission needed', 'Please enable location permissions');
+            requestPermission();
+            return;
+        }
+        
+        // Check notification permissions
+        BackgroundTrackingService.checkNotificationPermissions().then(enabled => {
+            if (!enabled) {
+                Alert.alert(
+                    'Notification Permission',
+                    'Enable notifications to track your ride in the background.',
+                    [
+                        { text: 'Skip', style: 'cancel' },
+                        { 
+                            text: 'Enable', 
+                            onPress: () => BackgroundTrackingService.requestNotificationPermissions()
+                        }
+                    ]
+                );
+            }
+        });
+        
+        // Reset refs when starting new trip
+        lastPositionRef.current = null;
+        coordinatesRef.current = [];
+        dispatch(startTrip());
+    };
+
+    const handlePauseResume = () => {
+        if (isPaused) {
+            dispatch(resumeTrip());
+            // Update Firebase background tracking service
             if (currentTrip) {
-                // Check if trip has meaningful distance (at least 10 meters)
-                if (currentTrip.distance < 0.01) {
-                    Alert.alert(
-                        'Trip Too Short',
-                        'This trip is too short to save. Try moving at least 10 meters.',
-                        [
-                            {
-                                text: 'Continue Tracking',
-                                style: 'cancel'
-                            },
-                            {
-                                text: 'Discard Trip',
-                                onPress: () => {
-                                    dispatch(stopTrip());
-                                }
-                            }
-                        ]
-                    );
-                    return;
-                }
-
-                // Calculate additional trip data
-                const enhancedTrip = {
-                    ...currentTrip,
-                    endTime: new Date().toISOString(),
-                    avgSpeed: AnalyticsService.calculateAvgSpeed(currentTrip.distance, currentTrip.duration),
-                    calories: AnalyticsService.calculateCalories(currentTrip.distance, currentTrip.duration),
-                };
-
-                // Save to database before stopping
-                try {
-                    await saveTrip(enhancedTrip, true); // Enable cloud sync
-                    await saveActiveTripState(null); // Clear active trip state
-                    dispatch(stopTrip());
-                    
-                    // Reset refs
-                    lastPositionRef.current = null;
-                    coordinatesRef.current = [];
-                    
-                    // Reload trips to ensure state consistency
-                    const { loadTrips } = await import('../services/database');
-                    const updatedTrips = await loadTrips();
-                    dispatch(loadTripsFromDB(updatedTrips));
-                    
-                    // Show achievement notifications
-                    const newTotalDistance = todayDistance + enhancedTrip.distance;
-                    
-                    Alert.alert(
-                        'Trip Completed! 🎉', 
-                        `Distance: ${enhancedTrip.distance.toFixed(2)} km\nDuration: ${formatDuration(enhancedTrip.duration)}\nCalories: ${enhancedTrip.calories} cal\n\n${newTotalDistance >= 10 ? '🏆 Great ride today!' : '🚴‍♂️ Keep it up!'}`
-                    );
-                } catch (error) {
-                    Alert.alert('Error', 'Failed to save trip. Please try again.');
-                    console.error('Error saving trip:', error);
-                    // Don't stop trip if save failed - let user retry
-                }
+                BackgroundTrackingService.resumeTracking();
+                BackgroundTrackingService.updateTripData(currentTrip, false);
             }
         } else {
-            if (!permissionGranted) {
-                Alert.alert('Permission needed', 'Please enable location permissions');
-                requestPermission();
+            dispatch(pauseTrip());
+            // Update Firebase background tracking service
+            if (currentTrip) {
+                BackgroundTrackingService.pauseTracking();
+                BackgroundTrackingService.updateTripData(currentTrip, true);
+            }
+        }
+    };
+
+    const handleFinishTrip = () => {
+        if (currentTrip) {
+            // Check if trip has meaningful distance (at least 10 meters)
+            if (currentTrip.distance < 0.01) {
+                Alert.alert(
+                    'Trip Too Short',
+                    'This trip is too short to save. Try moving at least 10 meters.',
+                    [
+                        {
+                            text: 'Continue Tracking',
+                            style: 'cancel'
+                        },
+                        {
+                            text: 'Discard Trip',
+                            onPress: () => {
+                                dispatch(finishTrip({}));
+                                dispatch(resetTrackingStatus());
+                            }
+                        }
+                    ]
+                );
                 return;
             }
-            // Reset refs when starting new trip
-            lastPositionRef.current = null;
-            coordinatesRef.current = [];
-            dispatch(startTrip());
-            // Active trip state will be saved automatically by the useEffect watching currentTrip
+
+            setShowTripNameModal(true);
+        }
+    };
+
+    const handleSaveTripWithName = async (name: string) => {
+        if (currentTrip) {
+            try {
+                // Finish trip with name
+                dispatch(finishTrip({ name }));
+                
+                // Get the finished trip from state (it will be in trips array now)
+                const finishedTrip = {
+                    ...currentTrip,
+                    name,
+                    endTime: new Date().toISOString(),
+                    avgSpeed: currentTrip.activeDuration > 0 ? (currentTrip.distance / (currentTrip.activeDuration / 3600)) : 0,
+                    calories: Math.round(currentTrip.distance * 45), // 45 cal/km estimate
+                };
+
+                // Save to database
+                await saveTrip(finishedTrip, true); // Enable cloud sync
+                await saveActiveTripState(null); // Clear active trip state
+                
+                // Reset refs
+                lastPositionRef.current = null;
+                coordinatesRef.current = [];
+                
+                // Reload trips to ensure state consistency
+                const { loadTrips } = await import('../services/database');
+                const updatedTrips = await loadTrips();
+                dispatch(loadTripsFromDB(updatedTrips));
+                
+                // Show achievement notifications
+                const newTotalDistance = todayDistance + finishedTrip.distance;
+                
+                // Show trip completed notification and send analytics
+                BackgroundTrackingService.showTripCompletedNotification(finishedTrip);
+                BackgroundTrackingService.sendTrackingAnalytics(finishedTrip);
+                
+                // Stop Firebase background tracking
+                BackgroundTrackingService.stopTracking();
+                
+                Alert.alert(
+                    'Trip Completed! 🎉', 
+                    `${name}\n\nDistance: ${finishedTrip.distance.toFixed(2)} km\nActive Time: ${formatDuration(finishedTrip.activeDuration || 0)}\nTotal Time: ${formatDuration(finishedTrip.duration)}\nCalories: ${finishedTrip.calories} cal\n\n${newTotalDistance >= 10 ? '🏆 Great ride today!' : '🚴‍♂️ Keep it up!'}`
+                );
+                
+                setShowTripNameModal(false);
+                dispatch(resetTrackingStatus());
+            } catch (error) {
+                Alert.alert('Error', 'Failed to save trip. Please try again.');
+                console.error('Error saving trip:', error);
+                setShowTripNameModal(false);
+            }
         }
     };
 
@@ -437,6 +562,36 @@ const TrackerScreen = () => {
         }
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
     }, []);
+
+    const getButtonConfig = () => {
+        if (!isTracking) {
+            return {
+                icon: Play,
+                text: 'START RIDE',
+                style: styles.startButton,
+                onPress: handleStartTrip
+            };
+        }
+        
+        if (isPaused) {
+            return {
+                icon: Play,
+                text: 'RESUME',
+                style: styles.resumeButton,
+                onPress: handlePauseResume
+            };
+        }
+        
+        return {
+            icon: Pause,
+            text: 'PAUSE',
+            style: styles.pauseButton,
+            onPress: handlePauseResume
+        };
+    };
+
+    const buttonConfig = getButtonConfig();
+    const IconComponent = buttonConfig.icon;
 
     return (
         <View style={styles.container}>
@@ -463,7 +618,7 @@ const TrackerScreen = () => {
                     </View>
                     
                     <View style={styles.statItem}>
-                        <Text style={styles.statsLabel}>Duration</Text>
+                        <Text style={styles.statsLabel}>Active Time</Text>
                         <Text style={styles.statsValue}>
                             {formatDuration(duration)}
                         </Text>
@@ -486,14 +641,41 @@ const TrackerScreen = () => {
                     </View>
                 )}
 
-                <TouchableOpacity
-                    style={[styles.button, isTracking ? styles.stopButton : styles.startButton]}
-                    onPress={handleToggleTracking}
-                >
-                    {isTracking ? <Square color="white" fill="white" size={20} /> : <Play color="white" fill="white" size={20} />}
-                    <Text style={styles.buttonText}>{isTracking ? 'STOP RIDE' : 'START RIDE'}</Text>
-                </TouchableOpacity>
+                {isPaused && (
+                    <View style={styles.pausedBanner}>
+                        <Text style={styles.pausedText}>⏸️ RIDE PAUSED</Text>
+                    </View>
+                )}
+
+                <View style={styles.buttonContainer}>
+                    <TouchableOpacity
+                        style={[styles.button, buttonConfig.style]}
+                        onPress={buttonConfig.onPress}
+                    >
+                        <IconComponent color="white" fill="white" size={20} />
+                        <Text style={styles.buttonText}>{buttonConfig.text}</Text>
+                    </TouchableOpacity>
+
+                    {isTracking && (
+                        <TouchableOpacity
+                            style={[styles.button, styles.finishButton]}
+                            onPress={handleFinishTrip}
+                        >
+                            <Flag color="white" fill="white" size={20} />
+                            <Text style={styles.buttonText}>FINISH</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
             </View>
+
+            <TripNameModal
+                visible={showTripNameModal}
+                onSave={handleSaveTripWithName}
+                onCancel={() => setShowTripNameModal(false)}
+                defaultName={`Ride ${new Date().toLocaleDateString()}`}
+                distance={currentTrip?.distance || 0}
+                duration={currentTrip?.activeDuration || 0}
+            />
         </View>
     );
 };
@@ -504,81 +686,105 @@ const styles = StyleSheet.create({
     },
     map: {
         flex: 1,
-        width: '100%',
-        height: '100%',
     },
     overlay: {
         position: 'absolute',
-        bottom: 40,
-        left: '5%',
-        right: '5%',
-        backgroundColor: colors.white,
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
         padding: 20,
-        borderRadius: 20,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 5 },
-        shadowOpacity: 0.3,
-        elevation: 5,
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 8,
     },
     statsContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
-        marginBottom: 12,
+        marginBottom: 20,
     },
     statItem: {
         alignItems: 'center',
-        flex: 1,
     },
     statsLabel: {
-        color: colors.gray,
         fontSize: 12,
+        color: colors.gray,
         marginBottom: 4,
+        textTransform: 'uppercase',
+        fontWeight: '600',
     },
     statsValue: {
-        color: colors.text,
         fontSize: 18,
         fontWeight: 'bold',
+        color: colors.text,
     },
     todayBanner: {
-        backgroundColor: colors.primary + '15',
-        padding: 12,
-        borderRadius: 12,
         flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: colors.primary,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 20,
         marginBottom: 16,
     },
     todayLabel: {
-        color: colors.primary,
+        color: colors.white,
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: '500',
     },
     todayValue: {
-        color: colors.primary,
+        color: colors.white,
         fontSize: 16,
         fontWeight: 'bold',
     },
+    pausedBanner: {
+        backgroundColor: '#f59e0b',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 20,
+        marginBottom: 16,
+        alignItems: 'center',
+    },
+    pausedText: {
+        color: colors.white,
+        fontSize: 14,
+        fontWeight: 'bold',
+    },
+    buttonContainer: {
+        flexDirection: 'row',
+        gap: 12,
+    },
     button: {
-        paddingVertical: 15,
-        paddingHorizontal: 30,
-        borderRadius: 50,
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 10,
-        alignSelf: 'center',
+        paddingVertical: 16,
+        borderRadius: 12,
+        gap: 8,
     },
     startButton: {
         backgroundColor: colors.primary,
     },
-    stopButton: {
-        backgroundColor: colors.error,
+    pauseButton: {
+        backgroundColor: '#f59e0b',
+    },
+    resumeButton: {
+        backgroundColor: colors.primary,
+    },
+    finishButton: {
+        backgroundColor: '#dc2626',
     },
     buttonText: {
         color: colors.white,
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: 'bold',
-    }
+    },
 });
 
 export default TrackerScreen;

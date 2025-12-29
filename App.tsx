@@ -5,7 +5,10 @@ import { store } from './src/store';
 import AppNavigator from './src/navigation/AppNavigator';
 import { initDatabase } from './src/services/database';
 import { FirebaseService } from './src/services/firebase';
+import { BackgroundTrackingService } from './src/services/backgroundTracking';
 import NotificationBanner from './src/components/NotificationBanner';
+import AppStateManager from './src/components/AppStateManager';
+import ActiveTrackingNotification from './src/components/ActiveTrackingNotification';
 import ConsentScreen from './src/screens/ConsentScreen';
 import { validateEnvironmentVariables } from './src/utils/env';
 
@@ -66,6 +69,10 @@ const App = () => {
       
       // Initialize Firebase services
       const firebaseInitialized = await FirebaseService.initialize();
+      
+      // Initialize background tracking service
+      await BackgroundTrackingService.initialize();
+      
       if (firebaseInitialized) {
         console.log('🚀 All services initialized successfully');
         
@@ -81,14 +88,13 @@ const App = () => {
         
         setNotification({
           visible: true,
-          title: '⚠️ Offline Mode',
-          message: 'App running in offline mode. Sign in for cloud sync.',
+          title: '📱 Offline Mode',
+          message: 'App ready in offline mode. Some features may be limited.',
           type: 'warning',
         });
       }
     } catch (error) {
       console.error('❌ Service initialization error:', error);
-      
       setNotification({
         visible: true,
         title: '❌ Initialization Error',
@@ -115,7 +121,9 @@ const App = () => {
   // Show main app if consent accepted
   return (
     <Provider store={store}>
+      <AppStateManager />
       <AppNavigator />
+      <ActiveTrackingNotification />
       <NotificationBanner
         visible={notification.visible}
         title={notification.title}

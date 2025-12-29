@@ -3,13 +3,14 @@ import { View, StyleSheet, Text, FlatList, TouchableOpacity, Image } from 'react
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store';
 import TripCard from '../components/TripCard';
+import TrackingStatusBar from '../components/TrackingStatusBar';
 import { colors } from '../theme/colors';
 import { loadTripsFromDB } from '../store/tripSlice';
 import { initDatabase, loadTrips } from '../services/database';
 
 const DashboardScreen = ({ navigation }: any) => {
     const dispatch = useDispatch();
-    const trips = useSelector((state: RootState) => state.trips.trips);
+    const { trips, isTracking } = useSelector((state: RootState) => state.trips);
 
     useEffect(() => {
         // Initialize database and load trips
@@ -23,8 +24,18 @@ const DashboardScreen = ({ navigation }: any) => {
         loadData();
     }, [dispatch]);
 
+    const handleFinishFromStatusBar = () => {
+        // Navigate to tracker screen to handle finish
+        navigation.navigate('Tracker');
+    };
+
     return (
         <View style={styles.container}>
+            {/* Show tracking status bar when actively tracking */}
+            {isTracking && (
+                <TrackingStatusBar onFinish={handleFinishFromStatusBar} />
+            )}
+            
             <View style={styles.summaryContainer}>
                 <Image
                     source={require('../assets/images/logo.jpg')}

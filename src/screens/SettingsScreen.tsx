@@ -589,6 +589,28 @@ const SettingsScreen = () => {
                 )}
             </View>
 
+            {/* Development/Testing Section - Only show in debug mode */}
+            {__DEV__ && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Development Tools</Text>
+                    
+                    <SettingItem
+                        key="test-notifications"
+                        title="Test Background Notifications"
+                        subtitle="Test tracking notifications in background"
+                        icon={Bell}
+                        onPress={() => {
+                            const { testBackgroundNotifications } = require('../utils/notificationTest');
+                            testBackgroundNotifications();
+                            Alert.alert(
+                                'Notification Test Started',
+                                'Check your notification panel for test notifications over the next 15 seconds.'
+                            );
+                        }}
+                    />
+                </View>
+            )}
+
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>App Info</Text>
                 
