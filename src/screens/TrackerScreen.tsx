@@ -158,7 +158,7 @@ const TrackerScreen = () => {
             const pendingAction = await BackgroundTrackingService.getPendingNotificationAction();
             
             if (pendingAction && currentTrip) {
-                switch (pendingAction) {
+                switch (pendingAction.action) {
                     case 'pause':
                         if (!isPaused) {
                             dispatch(pauseTrip());
@@ -431,7 +431,7 @@ const TrackerScreen = () => {
         }
         
         // Check notification permissions
-        BackgroundTrackingService.checkNotificationPermissions().then(enabled => {
+        BackgroundTrackingService.checkNotificationAvailability().then(enabled => {
             if (!enabled) {
                 Alert.alert(
                     'Notification Permission',

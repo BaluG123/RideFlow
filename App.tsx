@@ -6,6 +6,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { initDatabase } from './src/services/database';
 import { FirebaseService } from './src/services/firebase';
 import { BackgroundTrackingService } from './src/services/backgroundTracking';
+import { NotificationService } from './src/services/notifications';
 import NotificationBanner from './src/components/NotificationBanner';
 import AppStateManager from './src/components/AppStateManager';
 import ActiveTrackingNotification from './src/components/ActiveTrackingNotification';
@@ -66,6 +67,9 @@ const App = () => {
 
       // Initialize database
       initDatabase();
+      
+      // Initialize notification service first
+      await NotificationService.initialize();
       
       // Initialize Firebase services
       const firebaseInitialized = await FirebaseService.initialize();

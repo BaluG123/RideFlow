@@ -6,14 +6,12 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import DashboardScreen from '../screens/DashboardScreen';
 import TrackerScreen from '../screens/TrackerScreen';
-import SplashScreen from '../screens/SplashScreen';
-import ProfileScreen from '../screens/ProfileScreen';
 import TripDetailScreen from '../screens/TripDetailScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TrackingHeader from '../components/TrackingHeader';
 import { colors } from '../theme/colors';
-import { Bike, Map, User, BarChart3, Settings } from 'lucide-react-native';
+import { Bike, Map, BarChart3, Settings } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 
 const Tab = createBottomTabNavigator();
@@ -80,7 +78,7 @@ const TabNavigator = () => {
         },
         headerTintColor: colors.white,
         headerTitleStyle: {
-            fontWeight: 'bold',
+            fontWeight: 'bold' as const,
         },
     });
 
@@ -159,7 +157,28 @@ const TabNavigator = () => {
 const AppNavigator = () => {
     return (
         <NavigationContainer>
-            <TabNavigator />
+            <Stack.Navigator
+                screenOptions={{
+                    headerShown: false,
+                }}
+            >
+                <Stack.Screen name="AppTabs" component={TabNavigator} />
+                <Stack.Screen
+                    name="TripDetail"
+                    component={TripDetailScreen}
+                    options={{
+                        headerShown: true,
+                        title: 'Trip Details',
+                        headerStyle: {
+                            backgroundColor: colors.primary,
+                        },
+                        headerTintColor: colors.white,
+                        headerTitleStyle: {
+                            fontWeight: 'bold' as const,
+                        },
+                    }}
+                />
+            </Stack.Navigator>
         </NavigationContainer>
     );
 };
