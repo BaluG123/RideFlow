@@ -17,7 +17,11 @@ class TrackingModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
     @ReactMethod
     fun startForegroundService(title: String, content: String, isPaused: Boolean, promise: Promise) {
         try {
-            val serviceIntent = Intent(reactApplicationContext, TrackingService::class.java)
+            val serviceIntent = Intent(reactApplicationContext, TrackingService::class.java).apply {
+                putExtra(TrackingService.EXTRA_TITLE, title)
+                putExtra(TrackingService.EXTRA_CONTENT, content)
+                putExtra(TrackingService.EXTRA_IS_PAUSED, isPaused)
+            }
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 reactApplicationContext.startForegroundService(serviceIntent)
@@ -45,11 +49,9 @@ class TrackingModule(reactContext: ReactApplicationContext) : ReactContextBaseJa
     @ReactMethod
     fun updateNotification(title: String, content: String, isPaused: Boolean, promise: Promise) {
         try {
-            val serviceIntent = Intent(reactApplicationContext, TrackingService::class.java)
             if (TrackingService.isServiceRunning) {
-                // Create a temporary service instance to update notification
-                // In a real implementation, you'd want to communicate with the running service
-                reactApplicationContext.startService(serviceIntent)
+                // Use the static method to update the running service instance
+                TrackingService.updateNotificationFromModule(title, content, isPaused)
             }
             promise.resolve(true)
         } catch (e: Exception) {

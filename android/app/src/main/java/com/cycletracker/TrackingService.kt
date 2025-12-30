@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.graphics.Color
 import androidx.core.app.NotificationCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
@@ -18,15 +19,26 @@ class TrackingService : Service() {
         const val ACTION_PAUSE = "com.cycletracker.ACTION_PAUSE"
         const val ACTION_RESUME = "com.cycletracker.ACTION_RESUME"
         const val ACTION_FINISH = "com.cycletracker.ACTION_FINISH"
+        const val ACTION_UPDATE = "com.cycletracker.ACTION_UPDATE"
+        
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_CONTENT = "content"
+        const val EXTRA_IS_PAUSED = "isPaused"
         
         var isServiceRunning = false
         var reactContext: com.facebook.react.bridge.ReactContext? = null
+        private var instance: TrackingService? = null
+
+        fun updateNotificationFromModule(title: String, content: String, isPaused: Boolean) {
+            instance?.updateNotification(title, content, isPaused)
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         isServiceRunning = true
+        instance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -40,13 +52,19 @@ class TrackingService : Service() {
             ACTION_FINISH -> {
                 sendEventToJS("onFinishPressed", null)
             }
+            ACTION_UPDATE -> {
+                // Update notification with new data
+                val title = intent.getStringExtra(EXTRA_TITLE) ?: "Tracking Active"
+                val content = intent.getStringExtra(EXTRA_CONTENT) ?: "0.00 km • 0m"
+                val isPaused = intent.getBooleanExtra(EXTRA_IS_PAUSED, false)
+                updateNotification(title, content, isPaused)
+            }
             else -> {
                 // Start foreground service
-                val notification = createNotification(
-                    "Starting ride...",
-                    "0.00 km • 0m",
-                    false
-                )
+                val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Starting ride..."
+                val content = intent?.getStringExtra(EXTRA_CONTENT) ?: "0.00 km • 0m"
+                val isPaused = intent?.getBooleanExtra(EXTRA_IS_PAUSED, false) ?: false
+                val notification = createNotification(title, content, isPaused)
                 startForeground(NOTIFICATION_ID, notification)
             }
         }
@@ -60,6 +78,7 @@ class TrackingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isServiceRunning = false
+        instance = null
     }
 
     private fun createNotificationChannel() {
@@ -70,6 +89,8 @@ class TrackingService : Service() {
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
                 setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
             }
             
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -77,15 +98,16 @@ class TrackingService : Service() {
         }
     }
 
-    fun createNotification(title: String, content: String, isPaused: Boolean): Notification {
+    private fun createNotification(title: String, content: String, isPaused: Boolean): Notification {
         val notificationIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // Create custom layout with better styling
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
@@ -95,8 +117,12 @@ class TrackingService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setShowWhen(false)
+            .setColor(if (isPaused) Color.parseColor("#f59e0b") else Color.parseColor("#10b981"))
+            .setColorized(false)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
 
-        // Add action buttons
+        // Add action buttons with better styling
         if (isPaused) {
             val resumeIntent = Intent(this, TrackingService::class.java).apply {
                 action = ACTION_RESUME
@@ -107,7 +133,7 @@ class TrackingService : Service() {
             )
             builder.addAction(
                 android.R.drawable.ic_media_play,
-                "Resume",
+                "▶ Resume",
                 resumePendingIntent
             )
         } else {
@@ -120,7 +146,7 @@ class TrackingService : Service() {
             )
             builder.addAction(
                 android.R.drawable.ic_media_pause,
-                "Pause",
+                "⏸ Pause",
                 pausePendingIntent
             )
         }
@@ -134,7 +160,7 @@ class TrackingService : Service() {
         )
         builder.addAction(
             android.R.drawable.ic_menu_close_clear_cancel,
-            "Finish",
+            "🏁 Finish",
             finishPendingIntent
         )
 
