@@ -1,7 +1,5 @@
 import { AppState } from 'react-native';
-import messaging from '@react-native-firebase/messaging';
 import { Trip } from '../store/tripSlice';
-import { MessagingService } from './messaging';
 import { NotificationService } from './notifications';
 
 export class BackgroundTrackingService {
@@ -9,75 +7,67 @@ export class BackgroundTrackingService {
     private static updateInterval: ReturnType<typeof setInterval> | null = null;
     private static currentTrip: Trip | null = null;
     private static isPaused = false;
+    private static cleanupListeners: (() => void) | null = null;
 
     static async initialize() {
         if (this.isInitialized) return;
 
         try {
-            // Initialize both Firebase messaging and local notifications
-            await MessagingService.initialize();
+            // Initialize notification service
             await NotificationService.initialize();
-            
-            // Request notification permissions
-            const authStatus = await messaging().requestPermission();
-            const enabled =
-                authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-                authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
-            if (enabled) {
-                console.log('📱 Background tracking initialized');
-                this.setupMessageHandlers();
-                this.isInitialized = true;
-                return true;
-            } else {
-                console.log('📱 Notification permission denied');
-                return false;
-            }
+            console.log('📱 Background tracking initialized');
+            this.isInitialized = true;
+            return true;
         } catch (error) {
             console.error('📱 Background tracking initialization failed:', error);
             return false;
         }
     }
 
-    private static setupMessageHandlers() {
-        // Handle background messages for tracking actions
-        messaging().setBackgroundMessageHandler(async remoteMessage => {
-            console.log('📱 Background tracking message received:', remoteMessage);
-            // Handle Firebase messages if needed
-        });
+    static setupNotificationActionListeners(
+        onPause: () => void,
+        onResume: () => void,
+        onFinish: () => void
+    ) {
+        // Clean up previous listeners if any
+        if (this.cleanupListeners) {
+            this.cleanupListeners();
+        }
 
-        // Handle foreground messages
-        messaging().onMessage(async remoteMessage => {
-            console.log('📱 Foreground tracking message received:', remoteMessage);
-            // Handle Firebase messages if needed
-        });
+        // Setup new listeners
+        this.cleanupListeners = NotificationService.setupActionListeners(
+            onPause,
+            onResume,
+            onFinish
+        ) || null;
     }
 
     static startTracking(trip: Trip, isPaused: boolean = false) {
         this.currentTrip = trip;
         this.isPaused = isPaused;
-        
-        // Show persistent Android notification
+
+        // Show persistent notification
         NotificationService.showTrackingNotification(trip, isPaused);
-        
+
         // Start updating notification every 10 seconds
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
         }
-        
+
         this.updateInterval = setInterval(() => {
             if (this.currentTrip) {
                 NotificationService.updateTrackingNotification(this.currentTrip, this.isPaused);
             }
         }, 10000); // Update every 10 seconds
-        
+
         console.log('📱 Started background tracking for trip:', trip.id);
     }
 
     static updateTripData(trip: Trip, isPaused: boolean = false) {
         this.currentTrip = trip;
         this.isPaused = isPaused;
-        
+
         // Update notification immediately
         NotificationService.updateTrackingNotification(trip, isPaused);
     }
@@ -101,16 +91,22 @@ export class BackgroundTrackingService {
     static stopTracking() {
         this.currentTrip = null;
         this.isPaused = false;
-        
+
         // Clear update interval
         if (this.updateInterval) {
             clearInterval(this.updateInterval);
             this.updateInterval = null;
         }
-        
+
         // Hide tracking notification
         NotificationService.hideTrackingNotification();
-        
+
+        // Clean up listeners
+        if (this.cleanupListeners) {
+            this.cleanupListeners();
+            this.cleanupListeners = null;
+        }
+
         console.log('📱 Stopped background tracking');
     }
 
@@ -137,7 +133,10 @@ export class BackgroundTrackingService {
             // App going to background - ensure tracking notifications are active
             this.startTracking(currentTrip, isPaused);
         } else if (nextAppState === 'active') {
-            // App coming to foreground - notifications continue but reduce frequency if needed
+            // App coming to foreground - notifications continue but with current data
+            if (currentTrip) {
+                this.updateTripData(currentTrip, isPaused);
+            }
             console.log('📱 App active, notifications continue');
         }
     }
@@ -166,16 +165,16 @@ export class BackgroundTrackingService {
     static async sendTrackingAnalytics(trip: Trip) {
         try {
             // This could send tracking data to Firebase Analytics
-            console.log('📱 Sending tracking analytics to Firebase:', {
+            console.log('📱 Sending tracking analytics:', {
                 tripId: trip.id,
                 distance: trip.distance,
                 duration: trip.activeDuration,
                 avgSpeed: trip.avgSpeed,
             });
-            
+
             // In a real implementation, you might use Firebase Analytics
             // analytics().logEvent('trip_completed', { ... });
-            
+
         } catch (error) {
             console.error('📱 Error sending tracking analytics:', error);
         }

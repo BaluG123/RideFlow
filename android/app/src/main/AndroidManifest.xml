@@ -33,5 +33,12 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- Foreground Tracking Service -->
+      <service
+        android:name=".TrackingService"
+        android:foregroundServiceType="location"
+        android:enabled="true"
+        android:exported="false" />
     </application>
 </manifest>
