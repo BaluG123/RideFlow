@@ -10,6 +10,7 @@ import {
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { AnalyticsService, DailyStats, WeeklyStats, MonthlyStats } from '../services/analytics';
+import TrackingStatusBar from '../components/TrackingStatusBar';
 import { colors } from '../theme/colors';
 import { Calendar, TrendingUp, Award, Target } from 'lucide-react-native';
 

@@ -7,9 +7,10 @@ import { MapPin, Clock, Calendar } from 'lucide-react-native';
 
 interface TripCardProps {
     trip: Trip;
+    onPress?: () => void;
 }
 
-const TripCard: React.FC<TripCardProps> = ({ trip }) => {
+const TripCard: React.FC<TripCardProps> = ({ trip, onPress }) => {
     const navigation = useNavigation();
 
     const formatDate = (dateString: string) => {
@@ -24,11 +25,20 @@ const TripCard: React.FC<TripCardProps> = ({ trip }) => {
     };
 
     const handlePress = () => {
-        (navigation as any).navigate('TripDetail', { trip });
+        if (onPress) {
+            onPress();
+        } else {
+            (navigation as any).navigate('TripDetail', { trip });
+        }
     };
 
     return (
         <TouchableOpacity style={styles.card} onPress={handlePress} activeOpacity={0.7}>
+            {trip.name && (
+                <View style={styles.nameContainer}>
+                    <Text style={styles.tripName}>{trip.name}</Text>
+                </View>
+            )}
             <View style={styles.header}>
                 <Calendar size={16} color={colors.primary} />
                 <Text style={styles.date}>{formatDate(trip.date)}</Text>
@@ -41,9 +51,15 @@ const TripCard: React.FC<TripCardProps> = ({ trip }) => {
                 </View>
                 <View style={styles.stat}>
                     <Clock size={20} color={colors.secondary} />
-                    <Text style={styles.statValue}>{formatDuration(trip.duration)}</Text>
-                    <Text style={styles.statLabel}>Duration</Text>
+                    <Text style={styles.statValue}>{formatDuration(trip.activeDuration || trip.duration)}</Text>
+                    <Text style={styles.statLabel}>Active Time</Text>
                 </View>
+                {trip.avgSpeed && (
+                    <View style={styles.stat}>
+                        <Text style={styles.statValue}>{trip.avgSpeed.toFixed(1)}</Text>
+                        <Text style={styles.statLabel}>km/h</Text>
+                    </View>
+                )}
             </View>
         </TouchableOpacity>
     );
@@ -62,6 +78,17 @@ const styles = StyleSheet.create({
         elevation: 3,
         borderWidth: 1,
         borderColor: colors.border,
+    },
+    nameContainer: {
+        marginBottom: 8,
+        paddingBottom: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    tripName: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: colors.text,
     },
     header: {
         flexDirection: 'row',

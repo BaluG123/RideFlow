@@ -12,4 +12,11 @@ export const colors = {
     darkOverlay: 'rgba(0,0,0,0.5)',
     card: '#FFFFFF',
     border: '#D1FAE5',
+    // Additional colors for new features
+    info: '#3B82F6',
+    textSecondary: '#6B7280',
+    surface: '#FFFFFF',
+    accent: '#34D399',
+    black: '#000000',
+    darkGray: '#374151',
 };

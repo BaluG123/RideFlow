@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { View, StyleSheet, Text, FlatList, TouchableOpacity, Image } from 'react-native';
+import React from 'react';
+import { View, StyleSheet, Text, FlatList, Image } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState } from '../store';
 import TripCard from '../components/TripCard';
@@ -9,9 +9,9 @@ import { initDatabase, loadTrips } from '../services/database';
 
 const DashboardScreen = ({ navigation }: any) => {
     const dispatch = useDispatch();
-    const trips = useSelector((state: RootState) => state.trips.trips);
+    const { trips } = useSelector((state: RootState) => state.trips);
 
-    useEffect(() => {
+    React.useEffect(() => {
         // Initialize database and load trips
         const loadData = async () => {
             initDatabase();
@@ -40,7 +40,12 @@ const DashboardScreen = ({ navigation }: any) => {
             <FlatList
                 data={trips}
                 keyExtractor={(item) => item.id}
-                renderItem={({ item }) => <TripCard trip={item} />}
+                renderItem={({ item }) => (
+                    <TripCard 
+                        trip={item} 
+                        onPress={() => navigation.navigate('TripDetail', { trip: item })}
+                    />
+                )}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 ListHeaderComponent={<Text style={styles.sectionTitle}>Recent Activities</Text>}

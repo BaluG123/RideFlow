@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Notification channel configuration -->
+    <string name="default_notification_channel_id">rideflow_default</string>
+    <string name="tracking_notification_channel_id">tracking_channel</string>
+    <string name="tracking_notification_channel_name">Ride Tracking</string>
+    <string name="tracking_notification_channel_description">Persistent notification for active ride tracking</string>
+    
+    <!-- Notification actions -->
+    <string name="notification_action_pause">Pause</string>
+    <string name="notification_action_resume">Resume</string>
+    <string name="notification_action_finish">Finish</string>
+</resources>

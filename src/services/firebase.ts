@@ -157,15 +157,19 @@ export class FirebaseService {
     private static sanitizeTripForFirestore(trip: Trip, userId: string): any {
         return {
             id: trip.id,
+            name: trip.name ?? null,
             date: trip.date,
             distance: trip.distance,
             duration: trip.duration,
+            activeDuration: trip.activeDuration ?? 0,
             coordinates: trip.coordinates,
             avgSpeed: trip.avgSpeed ?? null,
             maxSpeed: trip.maxSpeed ?? null,
             calories: trip.calories ?? null,
             startTime: trip.startTime ?? null,
             endTime: trip.endTime ?? null,
+            pausedTime: trip.pausedTime ?? 0,
+            pauseStartTime: trip.pauseStartTime ?? null,
             userId: userId,
         };
     }
@@ -232,9 +236,11 @@ export class FirebaseService {
                 const data = doc.data();
                 trips.push({
                     id: data.id,
+                    name: data.name !== null && data.name !== undefined ? data.name : undefined,
                     date: data.date,
                     distance: data.distance ?? 0,
                     duration: data.duration ?? 0,
+                    activeDuration: data.activeDuration ?? 0,
                     coordinates: data.coordinates ?? [],
                     // Convert null to undefined for optional fields
                     avgSpeed: data.avgSpeed !== null && data.avgSpeed !== undefined ? data.avgSpeed : undefined,
@@ -242,6 +248,8 @@ export class FirebaseService {
                     calories: data.calories !== null && data.calories !== undefined ? data.calories : undefined,
                     startTime: data.startTime !== null && data.startTime !== undefined ? data.startTime : undefined,
                     endTime: data.endTime !== null && data.endTime !== undefined ? data.endTime : undefined,
+                    pausedTime: data.pausedTime ?? 0,
+                    pauseStartTime: data.pauseStartTime !== null && data.pauseStartTime !== undefined ? data.pauseStartTime : undefined,
                     userId: data.userId !== null && data.userId !== undefined ? data.userId : undefined,
                 });
             });

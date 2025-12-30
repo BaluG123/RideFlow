@@ -256,4 +256,60 @@ export class MessagingService {
             console.error('Error scheduling smart notifications:', error);
         }
     }
+
+    // Show local notification with enhanced options
+    static async showLocalNotification(notification: {
+        title: string;
+        body: string;
+        data?: any;
+        android?: {
+            channelId?: string;
+            ongoing?: boolean;
+            autoCancel?: boolean;
+            priority?: string;
+            visibility?: string;
+            color?: string;
+            actions?: Array<{ title: string; action: string }>;
+        };
+    }) {
+        try {
+            // For Android, we can use Firebase messaging to create persistent notifications
+            console.log('📱 Enhanced Local Notification:', notification.title, notification.body);
+            
+            // Store the notification for the app to handle
+            const notificationData = {
+                ...notification,
+                timestamp: new Date().toISOString(),
+                id: 'tracking_notification_' + Date.now(),
+            };
+            
+            // Store in AsyncStorage for app to display
+            await AsyncStorage.setItem('current_tracking_notification', JSON.stringify(notificationData));
+            
+            // In a real implementation with proper notification library:
+            // This would create an actual persistent notification
+            // For now, we'll simulate it with console logs and storage
+            
+            if (notification.android?.ongoing) {
+                console.log('📱 Creating persistent notification with actions:', notification.android.actions);
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('Failed to show enhanced local notification:', error);
+            return false;
+        }
+    }
+
+    // Cancel local notifications by type
+    static async cancelLocalNotifications(type: string) {
+        try {
+            console.log('📱 Cancelling local notifications of type:', type);
+            // Implementation would go here with actual notification library
+            return true;
+        } catch (error) {
+            console.error('Failed to cancel local notifications:', error);
+            return false;
+        }
+    }
 }
